@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1416
+version: 26.602.1421
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -26,14 +26,17 @@ multiplayer-safe gameplay state
 Unreal Engine implementation mapping
 near-implementation UE runtime architecture
 editor validation and acceptance testing
+reference implementation flow
+implementation roadmap
 ```
 
-The section is split into three levels:
+The section is split into four levels:
 
 ```text
 engine-agnostic design documents
 engine-specific Unreal Engine implementation documents
 validation, terminology, and acceptance documents
+reference flow and implementation roadmap documents
 ```
 
 The engine-agnostic documents define the source of truth. The Unreal Engine documents show how to implement that source of truth in UE 5.7.
@@ -74,6 +77,10 @@ Defines the multiplayer model: server authority, client prediction, remote-clien
 
 ### Unreal Engine Implementation Documents
 
+[Weapon Gameplay Tags for Unreal Engine](./weapon-gameplay-tags-ue.md)
+
+Defines the Gameplay Tag naming convention for reload sequences, step ids, commit points, rejection reasons, recovery policies, mechanical events, contact states, grip poses, and weapon policies.
+
 [Weapon Interaction Profile for Unreal Engine](./weapon-interaction-profile-ue.md)
 
 Maps the engine-agnostic data model into UE 5.7 DataAssets, profile structs, socket/bone authoring, editor validation, preview-facing authored data, and authoring workflow.
@@ -102,11 +109,19 @@ Maps the animation execution model into UE 5.7 AnimInstance state, Control Rig i
 
 Defines preview actor/component, validation reports, socket axis debug, hand assignment preview, magazine alignment preview, reload sequence preview, automated validation, and common authoring error detection.
 
-### Validation Documents
+### Reference and Validation Documents
+
+[Weapon Reference Implementation Flow for Unreal Engine](./weapon-reference-flow-ue.md)
+
+Provides one complete detachable magazine reload reference scenario: weapon profile, reload object, sequence profile, planner context, runtime plan, replicated state, object lifecycle, animation state, Control Rig visualization, and acceptance tests.
 
 [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md)
 
 Defines implementation tests for profile validation, solver behavior, reload scenarios, object lifecycle, networking, prediction rejection, editor preview, and LOD/gameplay separation.
+
+[Weapon Interaction Implementation Roadmap](./weapon-implementation-roadmap.md)
+
+Defines implementation stages: foundations, MVP detachable magazine reload, tooling, object lifecycle hardening, additional weapon types, networking edge cases, animation quality, and production hardening.
 
 ---
 
@@ -120,14 +135,17 @@ Defines implementation tests for profile validation, solver behavior, reload sce
 5. Weapon Animation Execution
 6. Procedural Weapon Reloading
 7. Weapon Interaction Networking
-8. Weapon Interaction Profile for Unreal Engine
-9. Weapon Reload Sequence Profile for Unreal Engine
-10. Weapon Reload Planner for Unreal Engine
-11. Weapon Runtime Implementation for Unreal Engine
-12. Weapon Reload Object Lifecycle for Unreal Engine
-13. Weapon Animation and Control Rig for Unreal Engine
-14. Weapon Editor Preview and Validation for Unreal Engine
-15. Weapon Interaction Tests and Acceptance Criteria
+8. Weapon Gameplay Tags for Unreal Engine
+9. Weapon Interaction Profile for Unreal Engine
+10. Weapon Reload Sequence Profile for Unreal Engine
+11. Weapon Reload Planner for Unreal Engine
+12. Weapon Runtime Implementation for Unreal Engine
+13. Weapon Reload Object Lifecycle for Unreal Engine
+14. Weapon Animation and Control Rig for Unreal Engine
+15. Weapon Editor Preview and Validation for Unreal Engine
+16. Weapon Reference Implementation Flow for Unreal Engine
+17. Weapon Interaction Tests and Acceptance Criteria
+18. Weapon Interaction Implementation Roadmap
 ```
 
 ---
@@ -143,6 +161,7 @@ flowchart TD
     AnimExec[Weapon Animation Execution]
     Reload[Procedural Weapon Reloading]
     Net[Weapon Interaction Networking]
+    Tags[Weapon Gameplay Tags for Unreal Engine]
     UEProfile[Weapon Interaction Profile for Unreal Engine]
     UESeq[Weapon Reload Sequence Profile for Unreal Engine]
     UEPlanner[Weapon Reload Planner for Unreal Engine]
@@ -150,7 +169,9 @@ flowchart TD
     UEObjects[Weapon Reload Object Lifecycle for Unreal Engine]
     UERig[Weapon Animation and Control Rig for Unreal Engine]
     UEPreview[Weapon Editor Preview and Validation for Unreal Engine]
+    Ref[Weapon Reference Implementation Flow for Unreal Engine]
     Tests[Weapon Interaction Tests and Acceptance Criteria]
+    Roadmap[Weapon Interaction Implementation Roadmap]
 
     Terms --> Data
     Terms --> Holding
@@ -167,6 +188,10 @@ flowchart TD
     AnimExec --> Reload
     Reload --> Net
 
+    Tags --> UEProfile
+    Tags --> UESeq
+    Tags --> UEPlanner
+    Tags --> UERuntime
     Data --> UEProfile
     UEProfile --> UESeq
     UEProfile --> UEPlanner
@@ -182,12 +207,21 @@ flowchart TD
     UEProfile --> UEPreview
     UESeq --> UEPreview
 
+    UEProfile --> Ref
+    UESeq --> Ref
+    UEPlanner --> Ref
+    UERuntime --> Ref
+    UEObjects --> Ref
+    UERig --> Ref
+
+    Ref --> Tests
     UEProfile --> Tests
     UEPlanner --> Tests
     UERuntime --> Tests
     UEObjects --> Tests
     UERig --> Tests
     UEPreview --> Tests
+    Tests --> Roadmap
 ```
 
 ---
@@ -218,6 +252,9 @@ Reload semantics:
 Networking layer:
   replicates gameplay state and phase, not IK every frame.
 
+Gameplay tags:
+  provide stable names for sequences, steps, commits, rejection reasons, recovery policies, contacts, and grip poses.
+
 UE profile and sequence assets:
   define authored data.
 
@@ -236,8 +273,14 @@ UE animation implementation:
 UE editor preview:
   validates authored sockets, axes, sequences, and hand assignments before runtime.
 
+Reference flow:
+  shows one complete implementation path from profile to replicated animation.
+
 Tests:
   define acceptance criteria for implementation quality.
+
+Roadmap:
+  defines staged implementation order.
 ```
 
 ---
@@ -255,12 +298,15 @@ Weapon interaction =
   + reload semantics
   + gameplay mechanical state
   + network-safe replication
+  + gameplay tags
   + UE authored assets
   + UE planner/runtime implementation
   + UE object lifecycle
   + UE animation implementation
   + editor validation
-  + acceptance tests.
+  + reference flow
+  + acceptance tests
+  + roadmap.
 ```
 
 The documents in this section should be detailed enough for an AI or engineer to implement, validate, debug, and extend the weapon interaction system directly, while still separating core logic from Unreal Engine details.
