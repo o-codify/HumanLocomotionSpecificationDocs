@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1456
+version: 26.602.1508
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -19,6 +19,7 @@ holding weapons
 stabilizing weapons with hands/shoulder/support contacts
 weapon-facing pose states such as relaxed carry, low ready, hip fire, point aim, and aim down sights
 interaction-facing fire readiness and fire visual response, without owning the fire backend
+compatibility with global full-body presentation mirroring
 procedural reloads as hand/object/weapon interaction
 magazine and ammo-object visual manipulation as interaction objects
 bolt/slide/pump/charging-handle operation as mechanism interaction
@@ -51,6 +52,10 @@ Defines shared terms used across the weapon interaction section: action step, st
 [Weapon Pose State Model](./weapon-pose-state-model.md)
 
 Defines weapon-in-hands pose states such as RelaxedCarry, LowReady, HighReady, HipFire, PointAim, AimDownSights, SprintingWithWeapon, Reloading, and ManipulatingMechanism as weapon/hand/contact states. It does not own locomotion speed or body orientation.
+
+[Weapon Interaction Mirroring](./weapon-interaction-mirroring.md)
+
+Defines how one canonical authored weapon interaction can support global full-body mirrored presentation without creating a real left-handed gameplay model, dynamic hand transfer, or duplicate mirrored interaction plans.
 
 [Weapon Aim and Fire Control](./weapon-aim-and-fire-control.md)
 
@@ -114,11 +119,11 @@ Defines gameplay object vs visual object handling from the interaction perspecti
 
 [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md)
 
-Maps the animation execution model into UE 5.7 AnimInstance state, Control Rig inputs, hand IK targets, elbow poles, weapon pose offsets, moving part animation, visual object attachment, animation LOD, and remote-client playback.
+Maps the animation execution model into UE 5.7 AnimInstance state, Control Rig inputs, hand IK targets, elbow poles, weapon pose offsets, moving part animation, visual object attachment, animation LOD, mirroring compatibility, and remote-client playback.
 
 [Weapon Editor Preview and Validation for Unreal Engine](./weapon-editor-preview-ue.md)
 
-Defines preview actor/component, validation reports, socket axis debug, hand assignment preview, magazine alignment preview, reload sequence preview, automated validation, and common authoring error detection.
+Defines preview actor/component, validation reports, socket axis debug, hand assignment preview, mirrored presentation preview, magazine alignment preview, reload sequence preview, automated validation, and common authoring error detection.
 
 ### Reference and Validation Documents
 
@@ -136,7 +141,7 @@ Defines tests for low ready, hip fire, ADS, sprint pose interaction, interaction
 
 [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md)
 
-Defines implementation tests for profile validation, solver behavior, reload scenarios, object lifecycle, networking, prediction rejection, editor preview, and LOD/gameplay separation.
+Defines implementation tests for profile validation, solver behavior, reload scenarios, object lifecycle, networking, prediction rejection, editor preview, mirroring safety, and LOD/gameplay separation.
 
 [Weapon Interaction Implementation Roadmap](./weapon-implementation-roadmap.md)
 
@@ -150,27 +155,28 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 1. Weapon Interaction Boundaries
 2. Weapon Interaction Terminology
 3. Weapon Pose State Model
-4. Weapon Aim and Fire Control
-5. Weapon Interaction Data Model
-6. Weapon Holding and Stabilization
-7. Weapon Solvers and Planning
-8. Weapon Animation Execution
-9. Procedural Weapon Reloading
-10. Weapon Interaction Networking
-11. Weapon Gameplay Tags for Unreal Engine
-12. Weapon Interaction Profile for Unreal Engine
-13. Weapon Reload Sequence Profile for Unreal Engine
-14. Weapon Reload Planner for Unreal Engine
-15. Weapon Runtime Implementation for Unreal Engine
-16. Weapon Holding and Aiming Implementation for Unreal Engine
-17. Weapon Reload Object Lifecycle for Unreal Engine
-18. Weapon Animation and Control Rig for Unreal Engine
-19. Weapon Editor Preview and Validation for Unreal Engine
-20. Weapon Reference Implementation Flow for Unreal Engine
-21. Weapon MVP Task Checklist for Unreal Engine
-22. Weapon Holding Aiming and Fire Tests
-23. Weapon Interaction Tests and Acceptance Criteria
-24. Weapon Interaction Implementation Roadmap
+4. Weapon Interaction Mirroring
+5. Weapon Aim and Fire Control
+6. Weapon Interaction Data Model
+7. Weapon Holding and Stabilization
+8. Weapon Solvers and Planning
+9. Weapon Animation Execution
+10. Procedural Weapon Reloading
+11. Weapon Interaction Networking
+12. Weapon Gameplay Tags for Unreal Engine
+13. Weapon Interaction Profile for Unreal Engine
+14. Weapon Reload Sequence Profile for Unreal Engine
+15. Weapon Reload Planner for Unreal Engine
+16. Weapon Runtime Implementation for Unreal Engine
+17. Weapon Holding and Aiming Implementation for Unreal Engine
+18. Weapon Reload Object Lifecycle for Unreal Engine
+19. Weapon Animation and Control Rig for Unreal Engine
+20. Weapon Editor Preview and Validation for Unreal Engine
+21. Weapon Reference Implementation Flow for Unreal Engine
+22. Weapon MVP Task Checklist for Unreal Engine
+23. Weapon Holding Aiming and Fire Tests
+24. Weapon Interaction Tests and Acceptance Criteria
+25. Weapon Interaction Implementation Roadmap
 ```
 
 ---
@@ -182,6 +188,7 @@ flowchart TD
     Boundaries[Weapon Interaction Boundaries]
     Terms[Weapon Interaction Terminology]
     Pose[Weapon Pose State Model]
+    Mirror[Weapon Interaction Mirroring]
     AimFire[Weapon Aim and Fire Control]
     Data[Weapon Interaction Data Model]
     Holding[Weapon Holding and Stabilization]
@@ -206,6 +213,7 @@ flowchart TD
 
     Boundaries --> Terms
     Boundaries --> Pose
+    Boundaries --> Mirror
     Boundaries --> AimFire
     Boundaries --> Data
     Boundaries --> Holding
@@ -213,6 +221,7 @@ flowchart TD
     Boundaries --> Net
 
     Terms --> Pose
+    Terms --> Mirror
     Terms --> AimFire
     Terms --> Data
     Terms --> Holding
@@ -221,8 +230,12 @@ flowchart TD
     Terms --> Reload
     Terms --> Net
 
+    Pose --> Mirror
     Pose --> AimFire
     Pose --> Holding
+    Mirror --> AnimExec
+    Mirror --> UERig
+    Mirror --> UEPreview
     AimFire --> Net
     AimFire --> UEAim
     Data --> Holding
@@ -292,6 +305,9 @@ Terminology:
 Pose state model:
   defines weapon/hand/contact pose states and how temporary interactions enter/exit them.
 
+Mirroring:
+  defines how canonical weapon interaction supports global full-body mirrored presentation without changing gameplay hand roles.
+
 Aim/fire control:
   defines interaction-facing aim and fire readiness state, not the full fire backend.
 
@@ -335,7 +351,7 @@ UE animation implementation:
   maps runtime interaction targets into AnimInstance and Control Rig.
 
 UE editor preview:
-  validates authored sockets, axes, sequences, and hand assignments before runtime.
+  validates authored sockets, axes, sequences, hand assignments, and mirrored presentation before runtime.
 
 Reference flow:
   shows one complete implementation path from profile to replicated animation.
@@ -359,6 +375,7 @@ Weapon interaction =
   clear boundaries
   + shared terminology
   + weapon/hand/contact pose states
+  + global presentation mirroring compatibility
   + interaction-facing aim/fire readiness
   + weapon interaction data
   + current hold state
