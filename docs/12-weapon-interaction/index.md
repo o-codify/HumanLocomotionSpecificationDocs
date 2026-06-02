@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1421
+version: 26.602.1422
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -28,6 +28,7 @@ near-implementation UE runtime architecture
 editor validation and acceptance testing
 reference implementation flow
 implementation roadmap
+MVP implementation checklist
 ```
 
 The section is split into four levels:
@@ -115,6 +116,10 @@ Defines preview actor/component, validation reports, socket axis debug, hand ass
 
 Provides one complete detachable magazine reload reference scenario: weapon profile, reload object, sequence profile, planner context, runtime plan, replicated state, object lifecycle, animation state, Control Rig visualization, and acceptance tests.
 
+[Weapon MVP Task Checklist for Unreal Engine](./weapon-mvp-task-checklist-ue.md)
+
+Defines the compact MVP implementation checklist: files to create, types/tags, profile asset, sequence asset, planner, runtime replication, object lifecycle, manipulation component, AnimInstance/Control Rig, networking, editor validation, and MVP tests.
+
 [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md)
 
 Defines implementation tests for profile validation, solver behavior, reload scenarios, object lifecycle, networking, prediction rejection, editor preview, and LOD/gameplay separation.
@@ -144,8 +149,9 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 14. Weapon Animation and Control Rig for Unreal Engine
 15. Weapon Editor Preview and Validation for Unreal Engine
 16. Weapon Reference Implementation Flow for Unreal Engine
-17. Weapon Interaction Tests and Acceptance Criteria
-18. Weapon Interaction Implementation Roadmap
+17. Weapon MVP Task Checklist for Unreal Engine
+18. Weapon Interaction Tests and Acceptance Criteria
+19. Weapon Interaction Implementation Roadmap
 ```
 
 ---
@@ -170,6 +176,7 @@ flowchart TD
     UERig[Weapon Animation and Control Rig for Unreal Engine]
     UEPreview[Weapon Editor Preview and Validation for Unreal Engine]
     Ref[Weapon Reference Implementation Flow for Unreal Engine]
+    Checklist[Weapon MVP Task Checklist for Unreal Engine]
     Tests[Weapon Interaction Tests and Acceptance Criteria]
     Roadmap[Weapon Interaction Implementation Roadmap]
 
@@ -214,7 +221,8 @@ flowchart TD
     UEObjects --> Ref
     UERig --> Ref
 
-    Ref --> Tests
+    Ref --> Checklist
+    Checklist --> Tests
     UEProfile --> Tests
     UEPlanner --> Tests
     UERuntime --> Tests
@@ -276,6 +284,9 @@ UE editor preview:
 Reference flow:
   shows one complete implementation path from profile to replicated animation.
 
+MVP checklist:
+  converts the reference flow into concrete implementation tasks and files.
+
 Tests:
   define acceptance criteria for implementation quality.
 
@@ -305,6 +316,7 @@ Weapon interaction =
   + UE animation implementation
   + editor validation
   + reference flow
+  + MVP checklist
   + acceptance tests
   + roadmap.
 ```
