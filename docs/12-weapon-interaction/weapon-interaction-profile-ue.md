@@ -2,53 +2,48 @@
 id: weapon-interaction-profile-for-unreal-engine
 title: Weapon Interaction Profile for Unreal Engine
 status: draft
-version: 26.602.1242
-tags: [ weapon, unreal-engine, ue5.7, data-assets, networking, procedural-animation, mermaid ]
+version: 26.602.1329
+tags: [ weapon, unreal-engine, ue5.7, data-assets, editor, validation, mermaid ]
 ---
 
 # Weapon Interaction Profile for Unreal Engine
 
 ## Purpose
 
-This document defines the Unreal Engine implementation contract for weapon interaction profiles.
+This document maps [Weapon Interaction Data Model](./weapon-interaction-data-model.md) into Unreal Engine 5.7 authoring assets.
 
-The goal is to make procedural weapon holding and reloading practical to implement in UE 5.7, not only conceptually correct.
+It defines the `UWeaponInteractionProfile` DataAsset, its authored structs, socket/bone authoring rules, validation, preview tooling, and editor workflow.
 
-The profile must describe where weapon interaction points are, what each point means, which local axes are used, which weapon features exist, which moving parts exist, which hands can access each point, which stabilization contacts are required, how the profile is validated in editor, how runtime components consume it, and how multiplayer replication refers to it.
+It does not define runtime replication, RPCs, executor loops, or `OnRep` behavior. Those are defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
+
+It does not define AnimInstance or Control Rig execution. That is defined in [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md).
 
 ---
 
-## System Overview
+## System Position
 
 ```mermaid
 flowchart TD
-    WeaponMesh[Weapon Skeletal Mesh]
-    Profile[UWeaponInteractionProfile DataAsset]
-    Interaction[UWeaponInteractionComponent]
-    Reload[UWeaponReloadComponent]
-    Manip[UProceduralWeaponManipulationComponent]
-    Anim[AnimInstance]
-    Rig[Control Rig / IK Rig]
-    Net[Replicated Reload State]
+    Mesh[Weapon Skeletal Mesh]
+    Profile[UWeaponInteractionProfile]
+    Validation[Editor Data Validation]
+    Preview[Editor Preview Tool]
+    Runtime[Weapon Runtime Implementation]
+    Rig[Weapon Animation and Control Rig]
 
-    WeaponMesh --> Interaction
-    Profile --> Interaction
-    Interaction --> Reload
-    Reload --> Manip
-    Reload --> Net
-    Net --> Reload
-    Manip --> Anim
-    Anim --> Rig
-    Rig --> CharacterPose[Final Character Pose]
-    Interaction --> WeaponPose[Weapon Part Offsets]
+    Mesh --> Profile
+    Profile --> Validation
+    Profile --> Preview
+    Profile --> Runtime
+    Runtime --> Rig
 ```
 
 Core rule:
 
 ```text
-DataAsset describes weapon interaction semantics.
-Runtime components resolve and execute interaction state.
-AnimBP and Control Rig only consume already resolved targets.
+The profile describes authored weapon interaction semantics.
+Runtime components consume it.
+The profile itself does not execute reloads or replicate state.
 ```
 
 ---
@@ -64,7 +59,13 @@ WeaponActor / WeaponItemActor
   UWeaponReloadComponent optional
 ```
 
-The weapon skeletal mesh contains bones for moving parts, sockets for static interaction points, and sockets on moving bones for moving interaction points.
+The weapon skeletal mesh contains:
+
+```text
+bones for moving parts
+sockets for static interaction points
+sockets on moving bones for moving interaction points
+```
 
 Examples:
 
@@ -90,7 +91,7 @@ PumpBone
 
 ## Data Assets
 
-Recommended data assets:
+Recommended weapon interaction authoring assets:
 
 ```text
 UWeaponInteractionProfile
@@ -100,7 +101,7 @@ UBodySlotProfile
 UWeaponReloadPolicy
 ```
 
-The most important one is `UWeaponInteractionProfile`.
+This document focuses on `UWeaponInteractionProfile`.
 
 ---
 
@@ -140,9 +141,13 @@ public:
 };
 ```
 
+The profile should be authored as gameplay data, not as a visual-only animation asset.
+
 ---
 
 ## Feature Set
+
+`FWeaponFeatureSet` is the UE representation of the feature set defined in [Weapon Interaction Data Model](./weapon-interaction-data-model.md).
 
 ```cpp
 USTRUCT(BlueprintType)
@@ -185,7 +190,39 @@ struct FWeaponFeatureSet
 };
 ```
 
-The feature set controls validation and reload planner branching.
+The feature set drives validation and planner branching, but the planner itself is implemented in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
+
+---
+
+## Grip Contacts
+
+```cpp
+USTRUCT(BlueprintType)
+struct FWeaponGripContactSet
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName MainGripSocket;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName SupportGripSocket;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName StockShoulderSocket;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName TwoHandPistolSupportSocket;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName SlingContactSocket;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName BipodContactSocket;
+};
+```
+
+These sockets define default holding contacts. They are consumed by the hold and stability logic described in [Weapon Holding and Stabilization](./weapon-holding.md).
 
 ---
 
@@ -238,14 +275,67 @@ struct FWeaponInteractionPoint
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly)
     bool bAllowMirroringByShoulderSide = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    bool bRequiresMovingPart = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, meta=(EditCondition="bRequiresMovingPart"))
+    FName MovingPartName;
 };
 ```
+
+The meaning of access regions, hand policies, stability requirements, and local axes is defined in [Weapon Interaction Data Model](./weapon-interaction-data-model.md). This UE struct is the authored representation.
+
+---
+
+## Moving Part Definition
+
+```cpp
+USTRUCT(BlueprintType)
+struct FWeaponMovingPartDefinition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName Name;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName BoneName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FName FollowSocketName;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FVector LocalMoveAxis = FVector::ForwardVector;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    float MoveDistance = 8.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    bool bReturnsAutomatically = true;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly)
+    FRuntimeFloatCurve MotionCurve;
+};
+```
+
+Examples:
+
+```text
+BoltBone
+SlideBone
+PumpBone
+BreakActionBone
+LeverBone
+```
+
+Moving part execution is handled by runtime and animation layers, not by the profile asset itself.
 
 ---
 
 ## Axis Convention
 
-Every interaction point uses local axes.
+The UE profile uses the axis convention defined in [Weapon Interaction Data Model](./weapon-interaction-data-model.md):
 
 ```text
 +X = primary action axis
@@ -253,220 +343,16 @@ Every interaction point uses local axes.
 +Z = outward/up reference axis
 ```
 
-For a magazine well:
+Examples:
 
 ```text
-+X = insert direction
--X = extract direction unless overridden
-+Z = magazine outward direction
+MagazineWell +X = insert direction
+MagazineWell -X = extract direction unless overridden
+Bolt +X = pull/open direction
+Pump +X = pump back direction
 ```
 
-For a bolt:
-
-```text
-+X = pull/open direction
--X = return/close direction unless overridden
-```
-
-This convention makes angled magazines and unusual weapons work through socket rotation instead of special code.
-
----
-
-## Runtime Component: UWeaponInteractionComponent
-
-```cpp
-UCLASS(ClassGroup=(Weapon), meta=(BlueprintSpawnableComponent))
-class UWeaponInteractionComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Profile")
-    TObjectPtr<UWeaponInteractionProfile> InteractionProfile;
-
-    UPROPERTY(Transient)
-    TObjectPtr<USkeletalMeshComponent> WeaponMesh;
-
-    virtual void BeginPlay() override;
-
-    bool GetInteractionPoint(FName Name, FWeaponInteractionPoint& OutPoint) const;
-    bool GetInteractionPointTransform(FName Name, FTransform& OutWorldTransform) const;
-
-    FVector GetPointAxisWorld(const FWeaponInteractionPoint& Point, FVector LocalAxis) const;
-
-    bool ValidateRuntimeProfile(FText& OutError) const;
-};
-```
-
-Axis helper:
-
-```cpp
-FVector UWeaponInteractionComponent::GetPointAxisWorld(
-    const FWeaponInteractionPoint& Point,
-    FVector LocalAxis) const
-{
-    FTransform SocketTransform;
-    if (!GetInteractionPointTransform(Point.Name, SocketTransform))
-    {
-        return FVector::ZeroVector;
-    }
-
-    return SocketTransform.TransformVectorNoScale(LocalAxis).GetSafeNormal();
-}
-```
-
----
-
-## Planner Data Flow
-
-```mermaid
-flowchart TD
-    Request[FReloadRequest]
-    CharState[Character Weapon Interaction State]
-    HoldState[Weapon Hold State]
-    MechState[Weapon Mechanical State]
-    Profile[Weapon Interaction Profile]
-    Inventory[Inventory / Body Slots]
-
-    Request --> Planner[Reload Planner]
-    CharState --> Planner
-    HoldState --> Planner
-    MechState --> Planner
-    Profile --> Planner
-    Inventory --> Planner
-
-    Planner --> Validation[Validation]
-    Validation -->|valid| Plan[FReloadActionPlan]
-    Validation -->|invalid| Reject[Reject / Recovery]
-
-    Plan --> Executor[Reload Executor]
-    Executor --> Commit[Gameplay Commit Points]
-    Executor --> Visual[Local Visual Targets]
-```
-
----
-
-## Multiplayer Data Flow
-
-```mermaid
-sequenceDiagram
-    participant OC as Owning Client
-    participant S as Server
-    participant RC as Remote Clients
-
-    OC->>OC: Start predicted reload visual
-    OC->>S: ServerStartReload(Request, PredictionId)
-    S->>S: Validate weapon/profile/ammo/state
-    S->>S: Build ReloadActionPlan
-    S-->>OC: Replicate ReloadInstance
-    S-->>RC: Replicate ReloadInstance
-    OC->>OC: Reconcile predicted visual with server time
-    RC->>RC: Reconstruct visual from step/time
-    S->>S: Apply commit points authoritatively
-    S-->>OC: Replicate MechanicalState
-    S-->>RC: Replicate MechanicalState
-```
-
-Network rule:
-
-```text
-Replicate reload state, step index, timestamps, object state, and mechanical state.
-Do not replicate hand IK targets every frame.
-```
-
----
-
-## Runtime Component: UWeaponReloadComponent
-
-```cpp
-UCLASS(ClassGroup=(Weapon), meta=(BlueprintSpawnableComponent))
-class UWeaponReloadComponent : public UActorComponent
-{
-    GENERATED_BODY()
-
-public:
-    UPROPERTY(ReplicatedUsing=OnRep_ReloadInstance)
-    FReplicatedReloadInstance ReloadInstance;
-
-    UPROPERTY(ReplicatedUsing=OnRep_MechanicalState)
-    FReplicatedWeaponMechanicalState MechanicalState;
-
-    UFUNCTION(Server, Reliable)
-    void ServerStartReload(FReloadRequest Request);
-
-    UFUNCTION(Server, Reliable)
-    void ServerInterruptReload(FGameplayTag Reason);
-
-protected:
-    UFUNCTION()
-    void OnRep_ReloadInstance();
-
-    UFUNCTION()
-    void OnRep_MechanicalState();
-
-    bool BuildReloadPlan(const FReloadRequest& Request, FReloadActionPlan& OutPlan);
-    void AdvanceAuthoritativeReload(float ServerTime);
-    void ApplyCommitPoint(FGameplayTag CommitPoint);
-};
-```
-
-The reload component owns gameplay reload state and replication, not the AnimBP.
-
----
-
-## Replicated Reload Instance
-
-```cpp
-USTRUCT(BlueprintType)
-struct FReplicatedReloadInstance
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    bool bIsReloading = false;
-
-    UPROPERTY()
-    FGameplayTag ReloadSequenceId;
-
-    UPROPERTY()
-    FGameplayTag CurrentStepId;
-
-    UPROPERTY()
-    uint8 StepIndex = 0;
-
-    UPROPERTY()
-    float StepStartServerTime = 0.f;
-
-    UPROPERTY()
-    float StepDuration = 0.f;
-
-    UPROPERTY()
-    EHand ResolvedHand = EHand::None;
-
-    UPROPERTY()
-    EReloadObjectType ObjectType;
-
-    UPROPERTY()
-    EReloadObjectVisualState ObjectVisualState;
-
-    UPROPERTY()
-    TObjectPtr<AActor> ReloadObjectActor;
-
-    UPROPERTY()
-    FGameplayTag CommitPoint;
-
-    UPROPERTY()
-    uint8 ReloadRevision = 0;
-};
-```
-
-Client phase:
-
-```cpp
-float Alpha = (ServerTimeNow - ReloadInstance.StepStartServerTime)
-            / ReloadInstance.StepDuration;
-Alpha = FMath::Clamp(Alpha, 0.f, 1.f);
-```
+Socket rotation is therefore gameplay-critical. A visually correct socket with incorrect local axes is invalid.
 
 ---
 
@@ -587,23 +473,25 @@ flowchart TD
 
 ---
 
-## Minimal MVP Implementation
+## What This Document Does Not Own
 
-Minimum viable UE implementation:
+This document does not own:
 
 ```text
-1. UWeaponInteractionProfile DataAsset.
-2. UWeaponInteractionComponent on weapon actor.
-3. UWeaponReloadComponent with replicated ReloadInstance and MechanicalState.
-4. UProceduralWeaponManipulationComponent on character.
-5. Magazine object with HandGripSocket and InsertTipSocket.
-6. Weapon sockets: MainGrip, SupportGrip, Stock optional, MagazineWell, Bolt optional, Muzzle.
-7. Straight-axis insert/extract using socket +X.
-8. Hand assignment using access region + shoulder side + stability check.
-9. Data validation for required sockets and axes.
-10. Debug draw for socket axes and insert path.
-11. Remote clients reconstruct visual phase from server time.
+runtime component implementation
+server RPCs
+replicated reload instance
+mechanical state replication
+reload executor loop
+OnRep behavior
+AnimInstance fields
+Control Rig solve order
 ```
+
+Those are defined in:
+
+- [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md)
+- [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md)
 
 ---
 
@@ -612,12 +500,10 @@ Minimum viable UE implementation:
 ```text
 UE weapon interaction profile =
   skeletal mesh sockets/bones
-  + UWeaponInteractionProfile semantic data
+  + authored semantic DataAsset
+  + axis convention
   + validation
-  + runtime interaction component
-  + reload planner/executor
-  + replicated reload/mechanical state
-  + local Control Rig visualization.
+  + preview tooling.
 ```
 
-The profile must be authored like gameplay data, not like a purely visual animation asset.
+Runtime, networking, and animation consume the profile; they are not defined by the profile document.
