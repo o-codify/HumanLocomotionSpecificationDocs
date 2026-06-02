@@ -2,7 +2,7 @@
 id: weapon-aim-and-fire-control
 title: Weapon Aim and Fire Control
 status: draft
-version: 26.602.1430
+version: 26.602.1454
 tags: [ weapon, aiming, fire-control, ads, hip-fire, networking ]
 ---
 
@@ -10,42 +10,46 @@ tags: [ weapon, aiming, fire-control, ads, hip-fire, networking ]
 
 ## Purpose
 
-This document defines the engine-agnostic aim and fire control model for weapons held in hands.
+This document defines the interaction-facing aim and fire readiness model for weapons held in hands.
 
-It covers:
+It covers only the parts of aiming/firing that are needed for weapon interaction:
 
 ```text
-aim source
-aim target
-muzzle direction
-sight alignment
-hip fire
-point aim
-aim down sights
-fire permission
-recoil/sway/spread concepts
-server-authoritative firing
-client prediction
-remote fire visualization
+aim source as an external input
+aim target as an external input
+muzzle/sight alignment as a weapon pose constraint
+hip fire as a weapon/hand/contact pose
+point aim as a weapon/hand/contact pose
+ADS as a weapon/hand/contact pose
+fire readiness from interaction state
+local visual fire feedback requests
+remote fire visualization requests
+interaction with reload/manipulation state
 ```
 
-Pose states are defined in [Weapon Pose State Model](./weapon-pose-state-model.md). Networking principles are defined in [Weapon Interaction Networking](./weapon-networking.md).
+This document does not own projectile simulation, hit validation, damage, ammo economy, inventory, camera implementation, fire-rate balance, or the full fire backend.
+
+Pose states are defined in [Weapon Pose State Model](./weapon-pose-state-model.md). Scope boundaries are defined in [Weapon Interaction Boundaries](./weapon-interaction-boundaries.md).
 
 ---
 
 ## Core Principle
 
 ```text
-Aiming is a stateful weapon pose constraint.
-Firing is a server-authoritative gameplay action.
-Animation visualizes aim and fire but does not decide whether a shot is valid.
+Aiming is a weapon pose constraint.
+Fire readiness is an interaction-state output.
+The actual fire backend decides whether a shot is executed and what it does.
 ```
+
+Animation visualizes aim/fire interaction state. It does not decide projectile, damage, hit, ammo, or backend fire validity.
 
 ---
 
-## Aim Sources
+## External Aim Inputs
 
-Common aim sources:
+Weapon interaction may receive aim intent from external systems.
+
+Common external aim sources:
 
 ```text
 CameraCenter
@@ -53,26 +57,27 @@ EyeLine
 WeaponSight
 MuzzleForward
 ControllerRotation
-AIThreatTarget
+AIIntentDirection
 ScriptedTarget
 ```
 
-Player-controlled weapons usually use camera/controller intent as the desired aim direction, then the weapon pose system attempts to align the weapon appropriately.
+Weapon interaction consumes the aim intent and attempts to maintain a plausible weapon/hand/contact pose for that intent.
+
+It does not own camera behavior or AI decision making.
 
 ---
 
-## Aim Target
+## Aim Target For Interaction
 
-Aim target can be represented as:
+For interaction, aim target can be represented as:
 
 ```text
 world point
 world direction
-actor/component target
-predicted projectile path target
+actor/component target reference
 ```
 
-Recommended runtime state:
+Recommended interaction-facing runtime state:
 
 ```text
 AimOrigin
@@ -82,6 +87,8 @@ AimSource
 AimMode
 AimAlpha
 ```
+
+Do not store full projectile prediction or damage result here.
 
 ---
 
@@ -94,218 +101,229 @@ LowReady
 HipFire
 PointAim
 AimDownSights
-CoverAim
+CoverAim as external cover-facing pose input if cover system exists
 ```
 
-Aim mode should usually correspond to weapon pose state, but may be represented separately for blending.
+Aim mode usually corresponds to weapon pose state, but may be represented separately for blending.
 
 ---
 
 ## Hip Fire
 
-Hip fire allows firing without strict sight alignment.
+Hip fire is a weapon/hand/contact pose where firing may be requested without strict sight alignment.
 
-Rules:
+Interaction rules:
 
 ```text
 weapon muzzle follows aim direction approximately
-camera does not need to align with weapon sight
-spread/recoil/sway usually worse than ADS
-movement freedom is higher
+sight alignment is not strict
+main hand remains on grip
+support hand remains active for two-handed weapons unless released by another interaction
 shoulder contact may be partial or absent depending on weapon
+weapon remains visually plausible relative to external aim direction
 ```
 
-Hip fire should not require the weapon to visually point at a completely different direction from the shot. Visual muzzle direction should remain plausibly close to gameplay fire direction.
+Weapon interaction may output a hip-fire readiness state. The fire backend decides final shot execution.
 
 ---
 
 ## Aim Down Sights
 
-ADS requires stricter alignment.
+ADS is a stricter weapon/hand/contact pose.
 
-Rules:
+Interaction rules:
 
 ```text
-weapon sight aligns to camera/eye line
-muzzle direction tightly follows aim direction
-shoulder contact preferred for long guns
-support hand contact preferred
-movement freedom reduced
-spread/sway/recoil policy improves or changes
+weapon sight aligns toward external aim intent
+muzzle direction follows aim direction more tightly than hip fire
+shoulder contact is preferred for long guns
+support hand contact is preferred
+ADS entry/exit is a transition, not an instant snap
 ```
 
-ADS entry should be a transition, not an instant snap.
+ADS does not own camera zoom, FOV, body yaw, turn-in-place, or locomotion speed.
 
 ---
 
 ## Point Aim
 
-Point aim is between hip fire and ADS.
+Point aim is between hip fire and ADS as a weapon interaction pose.
 
-Rules:
+Interaction rules:
 
 ```text
-weapon is raised and aimed deliberately
+weapon is raised deliberately
 sight alignment is not strict
 muzzle follows aim direction more closely than hip fire
-movement freedom is higher than ADS
-precision is better than hip fire but worse than ADS
+contacts are more constrained than relaxed/low-ready poses
 ```
 
 ---
 
-## Fire Permission
+## Interaction Fire Readiness
 
-Fire permission must consider:
+Weapon interaction may produce an interaction-facing fire readiness result.
+
+It should consider only interaction-owned or interaction-readable state:
 
 ```text
 weapon pose state
 aim mode
-mechanical state
-reload state
-stability state
-movement state
-weapon policy
-server cooldown / fire rate
-ammo/chamber state
+mechanical interaction state exposed to interaction
+reload/manipulation phase
+hand occupation
+hold stability
+external fire backend policy result if available
 ```
 
 Examples:
 
 ```text
-ADS + chambered round + stable hold → fire allowed
-HipFire + chambered round + acceptable stability → fire allowed
-Reloading before MagazineLocked → fire blocked
-Reloading after commit with CanFireAfterCommit policy → fire allowed if stable enough
-SprintingWithWeapon → fire blocked unless weapon policy allows
+ADS + stable hold + external fire backend allows fire → interaction-ready
+HipFire + acceptable stability + external fire backend allows fire → interaction-ready
+Reloading before required interaction commit → interaction-not-ready
+Reloading after required commit + policy allows → interaction-ready or recovery-needed
 ```
+
+Weapon interaction must not implement ammo economy, damage, projectile, or full fire-rate logic.
 
 ---
 
-## Fire Request
+## Fire Readiness Request
 
-Conceptual fire request:
+Conceptual interaction-facing request to an external fire backend:
 
 ```text
-FireRequest:
-  WeaponId
-  FireMode
-  AimOrigin
-  AimDirection
-  ClientFireTime
-  ClientPredictionId
+FireReadinessRequest:
+  WeaponReference
   PoseState
   AimMode
+  AimOrigin
+  AimDirection
+  InteractionPhase
+  HandsOccupied
+  HoldStability
+  InteractionCommitState
 ```
 
-Server validates:
+External backend may answer:
 
 ```text
-weapon equipped
-fire cooldown
-ammo/chamber state
-mechanical state
-reload/fire policy
-pose state allows fire
-aim direction within allowed tolerance
+CanFire
+BlockedReason
+FirePolicyResult
 ```
+
+Weapon interaction can use that answer to choose a visual response, recovery, or blocking pose.
 
 ---
 
-## Recoil, Sway, and Spread
+## Fire Visual Event
 
-This document defines concepts, not final weapon balance values.
+When an external fire backend confirms or predicts a fire event, weapon interaction may visualize it.
 
-```text
-Recoil:
-  short impulse caused by firing.
-
-Sway:
-  continuous low-frequency aim movement from breathing/movement/stance.
-
-Spread:
-  gameplay dispersion applied to shot direction.
-```
-
-Pose state affects them:
+Interaction-facing event:
 
 ```text
-HipFire → higher spread / less stable visual aim
-PointAim → medium spread / medium stability
-ADS → lower spread / stricter sight alignment
-Sprinting → fire blocked or very high penalty
+FireVisualEvent:
+  FireSequenceId
+  FireVisualTime
+  AimMode
+  PoseState
+  MuzzleTransform
+  RecoilVisualSeed optional
 ```
 
-Recoil and sway should be visualized locally, but server must own gameplay shot validation and authoritative hit/projectile state.
+Weapon interaction may use this for:
+
+```text
+weapon pose impulse
+hand recoil offset
+muzzle flash attachment point request
+remote fire pose reconstruction
+```
+
+Actual muzzle flash spawning, sound, projectile, hit, and damage may belong to other systems.
 
 ---
 
-## Muzzle vs Camera Direction
+## Recoil and Sway As Interaction Disturbance
 
-Gameplay must define which direction is authoritative for shot validation.
-
-Common policies:
+This document treats recoil/sway only as pose disturbance inputs/outputs.
 
 ```text
-CameraAuthoritativeWithMuzzleValidation
-MuzzleAuthoritative
-HybridCameraAimMuzzleSpawn
-AIWeaponMuzzleAuthoritative
+Recoil disturbance:
+  temporary offset applied to weapon/hands/pose after a fire visual event.
+
+Sway disturbance:
+  continuous low-frequency pose variation coming from external stance/movement/breathing systems.
 ```
 
-Recommended player policy:
+Weapon interaction may expose or consume:
 
 ```text
-Camera gives desired aim direction.
-Muzzle/sight must be within allowed angular tolerance.
-Projectile or trace starts according to weapon policy.
-Server validates pose and mechanical state.
+WeaponPoseDisturbance
+HandTargetDisturbance
+AimAlignmentDisturbance
 ```
 
-This avoids impossible shots while still keeping responsive player aiming.
+It must not define final weapon damage, fire balance, or shooter spread formula.
 
 ---
 
-## Fire Networking
+## Muzzle vs External Aim Direction
 
-Replicate fire events/state, not per-frame weapon IK.
+Weapon interaction can measure visual alignment between muzzle/sight and external aim direction.
 
-Conceptual replicated fields:
+It may output:
 
 ```text
-bIsFiring
+SightAlignmentErrorDegrees
+MuzzleAlignmentErrorDegrees
+bAimPoseVisuallyAligned
+```
+
+The fire backend decides how much this matters for shot execution.
+
+---
+
+## Fire Networking For Interaction Visualization
+
+Replicate or receive fire events/state needed for visual reconstruction, not per-frame IK.
+
+Interaction-facing fields may include:
+
+```text
+bIsFiringVisual
 FireSequenceId
-LastFireServerTime
-FireMode
+LastFireVisualServerTime
 AimMode
-CompressedAimDirection optional
-RecoilSeed optional
+PoseState
+RecoilVisualSeed optional
 ```
 
 Remote clients reconstruct:
 
 ```text
-muzzle flash
-sound
-recoil animation
-weapon fire pose
-projectile/tracer visuals
+weapon fire pose impulse
+hand recoil offset
+muzzle attachment point timing
+brief grip/contact disturbance
 ```
 
-Gameplay damage/projectiles remain server-authoritative.
+Projectile, damage, hit, ammo, and authoritative backend fire state remain external.
 
 ---
 
-## Client Prediction
+## Client Prediction Boundary
 
-Owning client may predict:
+Owning client may predict interaction visuals:
 
 ```text
-muzzle flash
-fire sound
-recoil animation
-camera recoil
-local projectile/tracer cosmetic
+weapon pose impulse
+hand recoil offset
+brief muzzle/weapon visual response request
+camera recoil request to external camera system
 ```
 
 Owning client must not authoritatively decide:
@@ -315,37 +333,37 @@ ammo consumption
 hit confirmation
 damage
 projectile authority
-mechanical state
+fire backend acceptance
 ```
 
 ---
 
 ## Interaction With Reload
 
-Reload can affect fire permission.
+Reload can affect interaction fire readiness.
 
-Policies:
+Interaction policies:
 
 ```text
-CannotFireDuringReload
-CanFireAfterCommit
-CanFireWithPenaltyAfterCommit
-CanFireOnlyWhenStableHoldRestored
+CannotRequestFireDuringReloadInteraction
+CanRequestFireAfterInteractionCommit
+CanRequestFireWithRecoveryAfterCommit
+CanRequestFireOnlyWhenStableHoldRestored
 ```
 
-If fire interrupts reload:
+If a fire request happens during reload:
 
 ```text
-server validates policy
-server commits or cancels reload according to recovery policy
-animation executes recovery or fire transition
+weapon interaction reports current phase, hand occupation, and commit state
+external fire backend decides whether a fire event is allowed
+weapon interaction performs visual recovery or fire-pose transition if needed
 ```
 
 ---
 
 ## Debug Requirements
 
-Debug should show:
+Debug should show interaction-facing data:
 
 ```text
 pose state
@@ -354,12 +372,11 @@ aim origin
 aim direction
 muzzle direction
 sight alignment error
-fire permission result
-blocked reason
-mechanical state
-reload state
-fire sequence id
-server fire time
+interaction fire readiness
+blocked reason from interaction or external backend
+mechanical interaction state
+reload/manipulation phase
+fire visual sequence id
 prediction id
 ```
 
@@ -368,12 +385,14 @@ prediction id
 ## Final Formula
 
 ```text
-Aim/fire control =
-  pose state
-  + aim source/target
-  + weapon/muzzle alignment
-  + mechanical state
-  + fire permission policy
-  + server-authoritative shot validation
-  + local visual prediction.
+Interaction-facing aim/fire =
+  external aim intent
+  + weapon pose state
+  + weapon/muzzle/sight alignment
+  + hand/contact stability
+  + reload/manipulation state
+  + fire readiness output
+  + local/remote visual fire response.
+
+It is not the full weapon fire backend.
 ```
