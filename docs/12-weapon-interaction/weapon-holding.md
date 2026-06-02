@@ -2,8 +2,8 @@
 id: weapon-holding-and-stabilization
 title: Weapon Holding and Stabilization
 status: draft
-version: 26.602.1227
-tags: [ weapon, upper-body, ik, procedural-animation, unreal-engine ]
+version: 26.602.1236
+tags: [ weapon, upper-body, ik, procedural-animation, unreal-engine, multiplayer ]
 ---
 
 # Weapon Holding and Stabilization
@@ -20,7 +20,7 @@ The core rule is:
 A weapon must always have a valid stabilization state.
 ```
 
-In normal combat handling this means at least one hand, shoulder, sling, bipod, surface, or other valid support contact must stabilize the weapon while the other hand performs a task.
+In normal combat handling this means at least one hand, shoulder, sling, bipod, surface, or other valid support contact must stabilize the weapon while another hand performs a task.
 
 ---
 
@@ -33,7 +33,7 @@ right hand always holds
 left hand always reloads
 ```
 
-Instead, every frame and every action is resolved from:
+Instead, every action is resolved from:
 
 ```text
 Current weapon pose
@@ -134,6 +134,64 @@ A socket should store a full transform, not only a position.
 
 ---
 
+## Runtime Input State
+
+Weapon holding must be solved from explicit runtime state, not from animation assumptions.
+
+### Character state
+
+```cpp
+struct FCharacterWeaponInteractionState
+{
+    ECharacterStance Stance;          // Stand, Crouch, Prone
+    EMovementState Movement;          // Idle, Walk, Run, Sprint, Falling
+    EWeaponPose WeaponPose;           // Aimed, LowReady, HipReady, ReloadPose
+    EShoulderSide ShoulderSide;       // Right, Left
+    bool bIsAiming;
+    bool bIsSprinting;
+    bool bIsInCover;
+};
+```
+
+### Hand state
+
+```cpp
+struct FHandInteractionState
+{
+    EHand Hand;
+    EHandRole CurrentRole;            // MainGrip, SupportGrip, Free, Manipulating
+    FName AttachedSocket;
+    TObjectPtr<UObject> HeldObject;
+    bool bCanRelease;
+    bool bIsBusy;
+};
+```
+
+### Weapon hold state
+
+```cpp
+struct FWeaponHoldState
+{
+    FName MainGripSocket;
+    FName SupportGripSocket;
+    FName ActiveShoulderSocket;
+
+    EShoulderSide ShoulderSide;
+
+    bool bRightHandContact;
+    bool bLeftHandContact;
+    bool bShoulderContact;
+    bool bSlingContact;
+    bool bBipodContact;
+    bool bSurfaceContact;
+
+    float StabilityScore;
+    EWeaponPose PreviousWeaponPose;
+};
+```
+
+---
+
 ## Weapon Contacts
 
 Weapon holding is represented as a set of contacts.
@@ -157,45 +215,6 @@ BodyClampContact
 ```
 
 A contact can be active, inactive, transitioning, or temporarily reserved for a manipulation action.
-
----
-
-## Weapon Hold State
-
-The weapon hold state stores the current relationship between hands, body, and weapon.
-
-```text
-WeaponHoldState
-  WeaponPose
-  ShoulderSide
-  RightHandContact
-  LeftHandContact
-  ShoulderContact
-  ActiveGripSockets
-  WeaponStability
-  PreviousWeaponPose
-```
-
-Common weapon poses:
-
-```text
-Aimed
-LowReady
-HipReady
-ReloadPose
-SprintLowered
-ProneSupported
-BipodSupported
-```
-
-The system should preserve the previous pose when entering an interaction:
-
-```text
-Aimed → ReloadPose → Aimed
-LowReady → ReloadPose → LowReady
-```
-
-If gameplay input changes during the interaction, the return pose can be updated.
 
 ---
 
@@ -247,19 +266,6 @@ StabilizingHand
 ```
 
 These roles may change during a sequence.
-
-For example:
-
-```text
-Before action:
-  LeftHand = TriggerHand
-  RightHand = ForegripHand
-  ShoulderSide = Left
-
-During bottom magazine reload:
-  RightHand = ManipulationHand
-  LeftHand + LeftShoulder = Stabilization
-```
 
 ---
 
@@ -350,6 +356,29 @@ Reload poses should support mirroring for left-shoulder and right-shoulder handl
 
 ---
 
+## Muzzle Control During Manipulation
+
+The system must define how much the weapon keeps its aim during manipulation.
+
+Possible policies:
+
+```text
+KeepAimApproximate
+LoweredSafe
+FreeDuringManipulation
+LockedToReloadPose
+```
+
+For normal gameplay, the recommended default is:
+
+```text
+KeepAimApproximate + reload pose offset
+```
+
+The muzzle stays generally aligned with the character/camera direction but is allowed to lower, roll, or offset enough to expose the interaction point.
+
+---
+
 ## Access Regions
 
 Every interaction point on the weapon has an access region.
@@ -382,11 +411,11 @@ Right shoulder → prefer LeftHand
 Left shoulder  → prefer RightHand
 ```
 
-This is only a preference. Final assignment must also pass the stability check.
+This is only a preference. Final assignment must also pass stability and reachability checks.
 
 ---
 
-## Hand Assignment Solver
+## Cost-Based Hand Assignment Solver
 
 The Hand Assignment Solver chooses the manipulation hand and stabilization contacts for an action.
 
@@ -403,6 +432,7 @@ InteractionPoint.LocalTransform
 InteractionPoint.RequiredDirection
 ActionType
 AvailableContacts
+Character stance and movement state
 ```
 
 Output:
@@ -413,46 +443,51 @@ StabilizationContacts
 RequiredRegrip
 RequiredWeaponPoseAdjustment
 ReturnGrip
+ReachabilityCost
+RejectedHandReasons
 ```
 
-Resolution order:
+The solver should evaluate both hands with a cost model:
 
 ```text
-1. Resolve preferred hand from access region.
-2. Check if the preferred hand can release its current grip.
-3. Check if the weapon remains stabilized.
-4. If valid, assign preferred hand.
-5. If invalid, test alternate hand.
-6. If alternate hand is awkward but possible, add weapon roll/tilt.
-7. If neither hand can act directly, insert a regrip sequence.
-8. If still invalid, block or request a supported pose.
+Cost =
+  side mismatch penalty
++ reach distance penalty
++ weapon instability penalty
++ regrip penalty
++ torso twist penalty
++ current hand busy penalty
++ stance constraint penalty
 ```
+
+The selected hand is the valid candidate with the lowest cost. If no candidate is valid, the system must insert a regrip, modify weapon pose, or block the action.
 
 ---
 
-## Preferred Hand vs Resolved Hand
+## Reachability Result
 
-The weapon interaction data may define a preferred hand policy, but runtime chooses the resolved hand.
+The system does not need full biomechanical simulation for MVP, but it needs a simple reachability test.
 
-```text
-PreferredHand = what is ergonomically intended.
-ResolvedHand  = what is currently possible and stable.
+```cpp
+struct FReachabilityResult
+{
+    bool bReachable;
+    float Cost;
+    bool bRequiresWeaponRoll;
+    bool bRequiresTorsoTwist;
+    bool bRequiresRegrip;
+};
 ```
 
-Example:
+The reachability test should consider:
 
 ```text
-Bolt access = Right
-PreferredHand = RightHand
-
-But:
-  RightHand is the only hand holding a pistol.
-  No stock exists.
-
-Resolved behavior:
-  keep RightHand on weapon
-  use LeftHand if reachable
-  or perform a regrip before RightHand operates the bolt
+hand-to-target distance
+max arm extension
+shoulder twist
+current stance
+weapon roll/tilt allowance
+simple body/weapon collision avoidance
 ```
 
 ---
@@ -470,6 +505,31 @@ Weapon is rolled inward before bottom magazine insertion.
 ```
 
 Regrip is not optional for correctness. It prevents the weapon from visually floating or losing support.
+
+---
+
+## Stance Constraints
+
+The hold solver must consider stance-specific restrictions.
+
+```text
+Standing:
+  Most reload poses are available.
+
+Crouch:
+  Weapon lowering and body slot access may be reduced.
+
+Prone:
+  Bottom magazine insertion may collide with ground.
+  Large magazines may require weapon roll.
+  Some reload variants may be blocked.
+
+Sprint:
+  Interaction is usually blocked or converted into a lowered reload pose.
+
+Falling / climbing:
+  Most reload tasks should be blocked or interrupted.
+```
 
 ---
 
@@ -497,6 +557,14 @@ weapon stability valid
 ---
 
 ## Unreal Engine Implementation Notes
+
+Recommended runtime components:
+
+```text
+UProceduralWeaponManipulationComponent   // on character
+UWeaponInteractionComponent              // on weapon
+UWeaponReloadComponent                   // on weapon or owning equipment component
+```
 
 Recommended asset structure:
 
@@ -526,6 +594,33 @@ The AnimBP should not own the weapon interaction logic. It should apply the alre
 
 ---
 
+## Multiplayer Rule
+
+Weapon holding and contact state can influence gameplay, but the server must not evaluate full IK.
+
+Server authority:
+
+```text
+weapon equipped state
+active weapon pose category
+whether weapon is in a valid gameplay hold state
+reload/fire/block permissions
+```
+
+Client visual authority:
+
+```text
+hand IK targets
+spine offsets
+finger pose
+minor contact blending
+weapon pose interpolation
+```
+
+For networking, replicate state and time, not per-frame hand transforms.
+
+---
+
 ## Debug Requirements
 
 Debug visualization should show:
@@ -540,6 +635,9 @@ resolved hand
 access region
 regrip requirement
 return grip
+reachability cost
+rejected hand reasons
+stance constraint result
 ```
 
 This is required because most bugs in this system are not animation bugs. They are invalid contact-state bugs.
@@ -549,7 +647,7 @@ This is required because most bugs in this system are not animation bugs. They a
 ## Final Formula
 
 ```text
-Weapon holding = contacts + pose + shoulder side + stability rules.
+Weapon holding = contacts + pose + shoulder side + stability rules + reachability.
 ```
 
 Weapon manipulation is valid only when it is planned on top of that holding state.
