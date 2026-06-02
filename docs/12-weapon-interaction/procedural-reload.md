@@ -2,242 +2,99 @@
 id: procedural-weapon-reloading
 title: Procedural Weapon Reloading
 status: draft
-version: 26.602.1237
-tags: [ weapon, reload, upper-body, ik, procedural-animation, unreal-engine, multiplayer, replication ]
+version: 26.602.1330
+tags: [ weapon, reload, upper-body, ik, procedural-animation, multiplayer ]
 ---
 
 # Procedural Weapon Reloading
 
 ## Purpose
 
-This document defines procedural weapon reloading as an upper-body manipulation system built on top of the weapon holding and stabilization model.
+This document defines procedural weapon reloading as an engine-agnostic interaction sequence built on top of weapon holding, weapon interaction data, solvers, animation execution, and networking.
 
-Reloading is not a hard-coded animation for a pistol, rifle, shotgun, or sniper rifle. It is a sequence of small manipulation actions that move hands, ammunition objects, magazines, and weapon mechanisms between valid contact states.
+It describes reload scenarios and reload-specific action semantics.
 
-The core idea:
+It does not own:
+
+- the full data model, which is defined in [Weapon Interaction Data Model](./weapon-interaction-data-model.md)
+- hand/stability/reachability planning, which is defined in [Weapon Solvers and Planning](./weapon-solvers-and-planning.md)
+- animation execution phases, which are defined in [Weapon Animation Execution](./weapon-animation-execution.md)
+- multiplayer authority and replication rules, which are defined in [Weapon Interaction Networking](./weapon-networking.md)
+- UE runtime implementation, which is defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md)
+
+---
+
+## Core Idea
 
 ```text
 Reloading = temporary disruption of a valid weapon hold pose
           + object transfer
           + directed insertion/extraction/operation
+          + mechanical state commit
           + restoration of a valid weapon hold pose
 ```
+
+Reloading is not a single animation. It is a sequence of validated manipulation steps.
 
 ---
 
 ## Scope
 
-The system must support:
+The reload model must support:
 
 ```text
 magazine reloads
+tactical reloads
+emergency reloads
 single-round insertion
-shotgun shell loading
+shotgun shell loading loops
 bolt cycling
 slide racking
 pump action
 break-action open/close
 bullpup magazine positions
 side/top/bottom magazine wells
-right-shoulder and left-shoulder stances
+angled magazines
 weapons with and without stock
-multiplayer replication
-owning-client prediction
-remote-client visual reconstruction
+right-shoulder and left-shoulder stances
+interruption and recovery
 ```
-
-The system must not require a separate hard-coded reload implementation per weapon type.
 
 ---
 
-## Main Rule
+## Required Inputs
 
-Every reload action must answer these questions:
-
-```text
-Where is the right hand now?
-Where is the left hand now?
-Which contacts stabilize the weapon?
-What object is the manipulation hand holding?
-Where is that object attached?
-Which direction is the action performed along?
-Where does the hand return after the action?
-What happens if the action is interrupted?
-What gameplay state changes at this step?
-What is replicated to other clients?
-```
-
-If a step cannot answer these questions, the step is incomplete.
-
----
-
-## Runtime Input State
-
-A reload plan is built from explicit runtime state.
+A reload sequence is built from:
 
 ```text
 ReloadRequest
-+ CharacterWeaponInteractionState
-+ HandInteractionState
-+ WeaponHoldState
-+ WeaponMechanicalState
-+ WeaponInteractionProfile
-+ Inventory/BodySlots
-→ Validated ReloadActionPlan
+WeaponHoldState
+WeaponInteractionData
+WeaponMechanicalState
+Inventory / BodySlots
+CharacterState
 ```
 
-### Reload request
+The structure and meaning of these inputs are defined in:
 
-```cpp
-struct FReloadRequest
-{
-    EReloadIntent Intent;        // FullReload, TacticalReload, EmergencyReload, LoadOne, CycleOnly
-    TObjectPtr<AActor> Weapon;
-    uint8 ClientPredictionId;
-};
-```
-
-### Weapon feature set
-
-```cpp
-struct FWeaponFeatureSet
-{
-    bool bHasMagazine;
-    bool bHasDetachableMagazine;
-    bool bHasInternalMagazine;
-    bool bHasSingleRoundChamber;
-    bool bHasBolt;
-    bool bHasChargingHandle;
-    bool bHasSlide;
-    bool bHasPump;
-    bool bHasBreakAction;
-    bool bHasStock;
-    bool bHasShoulderContact;
-};
-```
-
-### Weapon mechanical state
-
-```cpp
-struct FWeaponMechanicalState
-{
-    bool bMagazineInserted;
-    bool bMagazineLocked;
-    bool bRoundChambered;
-    bool bBoltOpen;
-    bool bNeedsCycle;
-    int32 AmmoInMagazine;
-    int32 AmmoInChamber;
-    int32 InternalAmmoCount;
-};
-```
-
-The mechanical state is required because reload is not binary. Examples:
-
-```text
-magazine inserted but not locked
-magazine locked but chamber empty
-bolt open
-pump back but not forward
-one shotgun shell inserted but tube is not full
-```
+- [Weapon Interaction Data Model](./weapon-interaction-data-model.md)
+- [Weapon Holding and Stabilization](./weapon-holding.md)
+- [Weapon Solvers and Planning](./weapon-solvers-and-planning.md)
 
 ---
 
-## Reload Planner and Executor
-
-The system must separate planning from visual execution.
-
-```text
-ReloadRequest
-  ↓
-ReloadPlanner
-  ↓
-ReloadActionPlan
-  ↓
-ReloadExecutor
-  ↓
-IK / weapon bones / object visuals / gameplay commit
-```
-
-The planner decides what must happen. The executor performs the steps over time.
-
-The planner must answer:
-
-```text
-Does the weapon need reload?
-Which reload intent is valid?
-Does the weapon have a magazine, chamber, tube, bolt, pump, or slide?
-Does the old magazine need to be removed?
-Should the old magazine be stowed or dropped?
-Where is the replacement object?
-Which hand performs each action?
-Which contacts stabilize the weapon?
-Does the weapon need a reload pose adjustment?
-Does the weapon need bolt/slide/pump operation after insertion?
-Where are gameplay commit points?
-What recovery is used if interrupted?
-```
-
----
-
-## Reload Action Step
-
-Runtime reload steps should be explicit and small.
-
-```cpp
-struct FReloadActionStep
-{
-    EReloadActionType Type;
-
-    EHand ResolvedHand;
-    EHand OtherHand;
-
-    FName TargetSocket;
-    FName ReturnSocket;
-
-    TObjectPtr<UObject> Object;
-
-    FVector AxisWorld;
-    float Distance;
-    float Duration;
-
-    EGameplayCommitPoint CommitPoint;
-
-    bool bCanInterrupt;
-    EInterruptRecoveryPolicy RecoveryPolicy;
-};
-```
-
-Common step types:
-
-```text
-PrepareWeaponPose
-ResolveHandAssignment
-Regrip
-ReleaseGrip
-ReachSocket
-GripObject
-DetachObject
-MoveAlongAxis
-AttachObject
-OperateWeaponPart
-ReturnHand
-RestorePose
-```
-
----
-
-## Reload as Action Sequence
+## Reload Action Sequence
 
 A reload sequence is composed of reusable actions:
 
 ```text
 PrepareWeaponPose
 ResolveHandAssignment
+Regrip
 ReleaseGrip
 ReachPoint
 GripObject
+DetachObject
 ExtractObject
 MoveObjectToBodySlot
 DropObject
@@ -247,110 +104,134 @@ InsertObject
 LockObject
 ReleaseObject
 OperateMechanism
+CommitMechanicalState
 ReturnHandToGrip
 RestoreWeaponPose
 ```
 
-Weapon-specific behavior is expressed through data:
-
-```text
-interaction point transforms
-access regions
-insert/extract/operate axes
-required stabilization
-object sockets
-sequence order
-dependency rules
-commit points
-replication events
-```
+The planner decides which actions are required. This document describes reload-specific usage of those actions.
 
 ---
 
-## Interaction Points
+## Reload Intents
 
-Every reload-relevant point must have a full semantic description.
-
-Example fields:
+Supported reload intents:
 
 ```text
-Name
-SocketName
-InteractionPointType
-AccessRegion
-PreferredHandPolicy
-RequiredStability
-LocalInsertAxis
-LocalExtractAxis
-LocalOperateAxis
-ApproachDistance
-InsertDistance
-LockDistance
+FullReload
+TacticalReload
+EmergencyReload
+LoadOne
+CycleOnly
+Unload
+ClearMalfunction optional
 ```
 
-A socket transform alone is not enough for gameplay logic. It says where the point is, but not how it should be used.
+### Emergency Reload
 
----
-
-## Weapon Profile Validation
-
-A data-driven weapon system requires validation. Invalid assets should fail loudly in editor and debug builds.
-
-Examples:
+Purpose:
 
 ```text
-If bHasDetachableMagazine:
-  MagazineWellSocket must exist.
-  InsertAxis must be valid.
-  ExtractAxis must be valid.
-  AccessRegion must be defined.
-  Compatible MagazineObjectProfile must exist.
-
-If bHasStock:
-  StockShoulderSocket must exist.
-
-If bHasPump:
-  PumpBone must exist.
-  PumpGripSocket must exist.
-  PumpBackAxis and PumpForwardAxis must be valid.
-
-If bHasBolt:
-  BoltSocket must exist.
-  OperateAxis must be valid.
+restore firing capability as quickly as possible
 ```
 
-Example validation error:
+Typical sequence:
 
 ```text
-WeaponProfile SMG_01 invalid:
-- MagazineWellSocket missing
-- Magazine InsertAxis is zero vector
-- Bolt access region defined but BoltSocket missing
+1. Move weapon to reload pose if needed.
+2. Stabilize weapon.
+3. Release manipulation hand.
+4. Remove old magazine if present.
+5. Drop old magazine.
+6. Fetch new magazine.
+7. Align magazine.
+8. Insert and lock magazine.
+9. Cycle bolt/slide if required.
+10. Return hand to valid hold.
+```
+
+### Tactical Reload
+
+Purpose:
+
+```text
+replace magazine while preserving the old magazine
+```
+
+Typical sequence:
+
+```text
+1. Move weapon to reload pose if needed.
+2. Stabilize weapon.
+3. Remove old magazine.
+4. Stow old magazine in body slot.
+5. Fetch new magazine.
+6. Insert and lock new magazine.
+7. Cycle mechanism if required.
+8. Return hand to valid hold.
+```
+
+### Load One
+
+Purpose:
+
+```text
+insert one round or shell without necessarily completing a full reload
+```
+
+Typical sequence:
+
+```text
+1. Stabilize weapon.
+2. Fetch one round/shell.
+3. Align round/shell insert tip.
+4. Insert along defined axis/path.
+5. Commit loaded round/shell.
+6. Continue loop or return hand to grip.
+```
+
+### Cycle Only
+
+Purpose:
+
+```text
+operate bolt, slide, pump, or charging handle without changing magazine/ammo object
+```
+
+Typical sequence:
+
+```text
+1. Stabilize weapon.
+2. Assign hand to mechanism point.
+3. Reach and grip mechanism.
+4. Move mechanism along operate path.
+5. Commit mechanical state.
+6. Return hand to grip.
 ```
 
 ---
 
 ## Magazine Insertion Model
 
-A magazine is normally a separate object, not a permanent weapon bone.
+A detachable magazine is a reload object.
 
-Magazine object sockets:
-
-```text
-MagazineRoot
-HandGripSocket
-InsertTipSocket
-LockSocket optional
-```
-
-Weapon sockets:
+Required magazine object points:
 
 ```text
-MagazineWellSocket
-MagazinePreInsertSocket optional
+HandGripPoint
+InsertTipPoint
+LockPoint optional
 ```
 
-The system aligns the magazine object so that the magazine insert tip matches the magazine well transform.
+Required weapon points:
+
+```text
+MagazineWell
+MagazinePreInsert optional
+MagazineRelease optional
+```
+
+Final alignment rule:
 
 ```text
 DesiredMagazineWorldTransform =
@@ -358,13 +239,13 @@ DesiredMagazineWorldTransform =
   * Inverse(MagazineInsertTipLocalTransform)
 ```
 
-This allows the magazine root to be anywhere and the magazine shape to be arbitrary.
+This allows the magazine root and shape to be arbitrary.
 
 ---
 
 ## Direction Is Socket Axis, Not Point-To-Point Line
 
-The insertion direction must not be derived only from the line between two positions.
+Insertion direction must come from authored local axes.
 
 Bad approach:
 
@@ -372,45 +253,38 @@ Bad approach:
 direction = normalize(WeaponSocketPosition - MagazineTipPosition)
 ```
 
-This fails for:
+Correct approach:
+
+```text
+InsertDirection = WeaponMagazineWellTransform.TransformAxis(LocalInsertAxis)
+```
+
+This supports:
 
 ```text
 angled magazines
 curved magazines
 side-mounted magazines
 top-mounted magazines
+bottom magazines
 bullpup magazines
 custom sci-fi magazine wells
 ```
 
-Correct approach:
-
-```text
-InsertDirection = WeaponMagazineWellSocket.TransformAxis(LocalInsertAxis)
-```
-
-Example convention:
-
-```text
-MagazineWellSocket +X = insertion direction
-MagazineWellSocket +Z = magazine outward direction
-MagazineWellSocket +Y = side direction
-```
-
-Then an MP5-style angled magazine, a bottom magazine, a top magazine, or a side magazine all use the same code.
+The axis convention is defined in [Weapon Interaction Data Model](./weapon-interaction-data-model.md).
 
 ---
 
 ## Pre-Insert and Final Insert
 
-Insertion uses at least two target poses:
+Insertion should use at least two poses:
 
 ```text
 PreInsertPose = MagazineWellTransform - InsertDirection * InsertDistance
 FinalInsertPose = MagazineWellTransform
 ```
 
-The magazine first aligns to the well, then travels along the insert axis.
+Sequence:
 
 ```text
 Approach → Align → Insert → Lock
@@ -422,10 +296,10 @@ The insert motion should not be a direct hand teleport to the final socket.
 
 ## Magazine Extraction
 
-Extraction is the reverse of insertion, but it may use a different axis.
+Extraction may use a different axis from insertion.
 
 ```text
-ExtractDirection = MagazineWellSocket.TransformAxis(LocalExtractAxis)
+ExtractDirection = MagazineWellTransform.TransformAxis(LocalExtractAxis)
 ```
 
 For simple weapons:
@@ -434,36 +308,35 @@ For simple weapons:
 ExtractDirection = -InsertDirection
 ```
 
-For some weapons:
+For custom weapons:
 
 ```text
 extract down/back
 insert up/forward
-rock-in magazine path
+rock-in path
 curved path
 ```
 
-Therefore extract and insert axes should be separately configurable.
+Insert and extract axes should be separately configurable.
 
 ---
 
 ## Rock-In and Curved Magazine Paths
 
-Some magazines do not move in a straight line. They rotate into place.
+Some magazines rotate or move through multiple path segments.
 
-The system should support optional multi-stage insertion:
+Example rock-in path:
 
 ```text
-Stage 1: hook front/rear point
-Stage 2: rotate magazine around pivot
-Stage 3: lock magazine
+1. Hook front/rear point.
+2. Rotate magazine around pivot.
+3. Lock magazine.
 ```
 
-Data fields:
+Required data:
 
 ```text
-bUseRockIn
-RockPivotSocket
+RockPivotPoint
 RockStartAngle
 RockEndAngle
 LockMotionDistance
@@ -473,126 +346,9 @@ This is still the same reload system. Only the insertion path changes.
 
 ---
 
-## Access Region and Hand Selection
+## Bottom Magazine Example
 
-Hand selection is based on geometry and current stance.
-
-Base preference:
-
-```text
-Right access → prefer RightHand
-Left access  → prefer LeftHand
-Top/Bottom access + RightShoulder → prefer LeftHand
-Top/Bottom access + LeftShoulder  → prefer RightHand
-```
-
-But this preference is not final.
-
-The system must check:
-
-```text
-Can the selected hand release its current grip?
-Will the weapon remain stabilized?
-Does the selected hand reach the point without impossible twisting?
-Is a regrip required first?
-Should the weapon roll/tilt into a reload pose?
-```
-
-Final result:
-
-```text
-PreferredHand → stability/reachability/cost check → ResolvedHand
-```
-
----
-
-## Body Slot Selection
-
-Body slots are also interaction points.
-
-Examples:
-
-```text
-ChestMagazinePouch
-BeltMagazinePouch
-LeftShellCarrier
-RightShellCarrier
-BackpackAmmoSlot
-```
-
-Body slot data should include:
-
-```text
-SocketName
-AccessRegion
-HandPolicy
-ReloadObjectType
-Priority
-```
-
-The planner should choose a compatible object from a reachable slot. This can influence hand choice.
-
-```text
-Chosen hand depends on weapon access + body slot access + stability.
-```
-
----
-
-## Weapons With Stock
-
-A stocked weapon can often be stabilized by:
-
-```text
-grip hand + shoulder contact
-```
-
-This allows the other hand to leave the weapon.
-
-Example right-side bolt on right shoulder:
-
-```text
-1. LeftHand strengthens support grip.
-2. RightHand releases MainGrip.
-3. RightHand operates BoltSocket.
-4. RightHand returns to MainGrip.
-5. Two-hand hold is restored.
-```
-
-Weapon is stabilized by:
-
-```text
-LeftHand + RightShoulder
-```
-
----
-
-## Weapons Without Stock
-
-A weapon without stock has fewer stabilization contacts.
-
-Example pistol:
-
-```text
-RightHand keeps MainGrip.
-LeftHand manipulates magazine or slide.
-```
-
-If the same-side hand is the only valid stabilizer, the system must not release it without a regrip.
-
-Possible solutions:
-
-```text
-use the opposite hand if reachable
-rotate the weapon into a reload pose
-first transfer stabilization to the other hand
-block that reload variant
-```
-
----
-
-## Magazine Reload Example: Bottom Magazine, Right Shoulder
-
-Initial state:
+Right shoulder initial state:
 
 ```text
 RightHand = MainGrip
@@ -600,68 +356,46 @@ LeftHand = SupportGrip
 RightShoulderContact = active
 ```
 
-Sequence:
+Typical sequence:
 
 ```text
-1. PrepareWeaponPose: lower/roll weapon into reload pose.
+1. PrepareWeaponPose: lower/roll weapon.
 2. RightHand + shoulder stabilize weapon.
 3. LeftHand releases SupportGrip.
-4. LeftHand reaches MagazineWellSocket.
+4. LeftHand reaches MagazineWell.
 5. LeftHand grips old magazine.
-6. LeftHand extracts magazine along ExtractDirection.
+6. LeftHand extracts magazine.
 7. Old magazine is dropped or stowed.
-8. LeftHand fetches new magazine from body slot.
-9. New magazine aligns InsertTipSocket to PreInsertPose.
+8. LeftHand fetches new magazine.
+9. New magazine aligns to PreInsertPose.
 10. LeftHand inserts magazine along InsertDirection.
-11. Magazine locks to Weapon.MagazineWellSocket.
+11. Magazine locks.
 12. LeftHand releases magazine.
 13. LeftHand returns to SupportGrip.
-14. Restore previous weapon pose or updated pose.
+14. Weapon restores previous or updated hold pose.
 ```
+
+Left shoulder mirrors the hand roles through the solver, not through a separate hard-coded reload.
 
 ---
 
-## Magazine Reload Example: Bottom Magazine, Left Shoulder
-
-Initial state:
-
-```text
-LeftHand = MainGrip
-RightHand = SupportGrip
-LeftShoulderContact = active
-```
-
-Sequence mirrors the right-shoulder version:
-
-```text
-1. LeftHand + left shoulder stabilize weapon.
-2. RightHand releases SupportGrip.
-3. RightHand changes the bottom magazine.
-4. RightHand returns to SupportGrip.
-```
-
-The weapon data does not need a separate left-shoulder reload. The solver resolves it from shoulder side and access region.
-
----
-
-## Magazine Reload Example: Right-Side Magazine
+## Right-Side Magazine Example
 
 For a right-side magazine:
 
 ```text
 AccessRegion = Right
-PreferredHandPolicy = SameSide
-PreferredHand = RightHand
+HandPolicy = SameSide
 ```
 
-If the weapon is on the left shoulder:
+If weapon is on left shoulder:
 
 ```text
-LeftHand + LeftShoulder stabilize
-RightHand changes magazine
+LeftHand + LeftShoulder stabilize.
+RightHand changes magazine.
 ```
 
-If the weapon is on the right shoulder and RightHand is on MainGrip:
+If weapon is on right shoulder and right hand is on main grip:
 
 ```text
 1. LeftHand strengthens support contact.
@@ -670,131 +404,110 @@ If the weapon is on the right shoulder and RightHand is on MainGrip:
 4. RightHand returns to MainGrip.
 ```
 
-Same-side access is preserved, but stabilization is explicitly planned.
+The sequence is chosen by stability and hand assignment solvers.
 
 ---
 
 ## Bullpup / Rear Magazine Example
 
-A bullpup weapon is not a special system case.
+Bullpup weapons do not require a separate system.
 
 Data example:
 
 ```text
-MagazineWellSocket = behind MainGripSocket
+MagazineWell = behind MainGrip
 AccessRegion = BottomRear or Custom
-InsertAxis = socket local +X
-ExtractAxis = socket local -X or custom down/back
-PreferredHandPolicy = OppositeShoulderSide or Custom
+InsertAxis = authored local axis
+ExtractAxis = authored local axis
+HandPolicy = OppositeShoulderSide or Custom
 ```
 
-The solver uses the actual transform and access region. The sequence remains:
-
-```text
-extract old magazine
-move/stow/drop old magazine
-fetch new magazine
-align insert tip
-insert along axis
-lock
-return hand
-```
+The same extract/fetch/align/insert/lock sequence applies.
 
 ---
 
 ## Single-Round Insertion
 
-Single-round reloads use the same manipulation framework.
+Single-round reload uses the same object manipulation framework.
 
 Objects:
 
 ```text
 RoundObject
-RoundHandGripSocket
-RoundInsertTipSocket
+RoundHandGripPoint
+RoundInsertTipPoint
 ```
 
 Weapon points:
 
 ```text
-ChamberSocket
-ShellInsertSocket
-EjectionPortSocket
+Chamber
+ShellInsert
+EjectionPort
 ```
 
 Sequence:
 
 ```text
 1. Stabilize weapon.
-2. Manipulation hand fetches round from body slot.
-3. Round insert tip aligns to chamber or shell insert socket.
-4. Round moves along InsertDirection.
-5. Round commits to weapon ammo state.
-6. Hand releases or continues to next round.
-7. Hand returns to grip when sequence ends.
+2. Fetch round from body slot.
+3. Align round insert tip.
+4. Move round along insert path.
+5. Commit round inserted/chambered state.
+6. Release or continue to next round.
+7. Return to valid hold.
 ```
 
 ---
 
 ## Shotgun Shell Loading
 
-Tube-fed shotgun loading is a repeated single-round insertion sequence.
+Tube-fed shotgun loading is a repeated single-round insertion loop.
 
-Example bottom loading port:
-
-```text
-ShellInsertSocket.AccessRegion = Bottom
-PreferredHandPolicy = OppositeShoulderSide
-```
-
-Right shoulder:
-
-```text
-RightHand + shoulder stabilize
-LeftHand fetches and inserts shells
-```
-
-Left shoulder:
-
-```text
-LeftHand + shoulder stabilize
-RightHand fetches and inserts shells
-```
-
-Repeated loop:
+Typical loop:
 
 ```text
 FetchShell → AlignShell → InsertShell → CommitShell → FetchNextShell
 ```
 
-The loop can be interrupted after each shell.
+The loop can be interrupted after each committed shell.
+
+Example bottom loading port:
+
+```text
+AccessRegion = Bottom
+HandPolicy = OppositeShoulderSide
+```
+
+Right shoulder usually resolves to left-hand insertion. Left shoulder usually resolves to right-hand insertion.
 
 ---
 
 ## Bolt, Slide, and Charging Handle Operation
 
-Mechanism operation is also a directed manipulation action.
+Mechanism operation is a directed manipulation action.
 
-Interaction point fields:
+Required data:
 
 ```text
-OperateSocket
+OperatePoint
 AccessRegion
 OperateAxis
 OperateDistance
 ReturnAxis
 ReturnDistance
 RequiredStability
+LinkedMovingPart optional
 ```
 
-For moving parts, the action should drive the weapon bone and the hand should follow the socket on that bone.
+For moving parts:
 
 ```text
-Action drives BoltBone / SlideBone / PumpBone
-Hand IK follows socket on the moving bone
+Action drives moving part.
+Hand follows follow point on moving part.
 ```
 
-This is more stable than letting the hand pull the weapon part physically.
+The animation and following behavior are defined in [Weapon Animation Execution](./weapon-animation-execution.md).
 
 ---
 
@@ -802,481 +515,90 @@ This is more stable than letting the hand pull the weapon part physically.
 
 Pump action uses a moving fore-end.
 
-Weapon structure:
+Typical sequence:
 
 ```text
-PumpBone
-  └─ PumpGripSocket
+1. Stabilizing hand remains on main grip and/or shoulder contact.
+2. Pump hand remains attached to pump grip point.
+3. Pump moves backward along pump-back axis.
+4. Pump moves forward along pump-forward axis.
+5. Mechanical state commits at the required point.
 ```
 
-Sequence:
-
-```text
-1. Stabilization hand remains on MainGrip and shoulder contact.
-2. Pump hand stays attached to PumpGripSocket.
-3. PumpBone moves backward along PumpBackAxis.
-4. PumpBone moves forward along PumpForwardAxis.
-5. Pump hand remains or returns to support state.
-```
-
-Pump action is not a detached reach action. The hand is attached to a moving weapon part.
+Pump action is not a detached reach action. The hand is constrained to a moving part.
 
 ---
 
-## Object Attachment States
+## Object Attachment and Commit Points
 
-Reload objects should have explicit states:
+Reload object attachment states are defined in [Weapon Interaction Data Model](./weapon-interaction-data-model.md).
 
-```text
-AttachedToWeapon
-AttachedToHand
-AttachedToBodySlot
-DroppedInWorld
-Inserted
-Consumed
-```
+Gameplay commit authority and replication are defined in [Weapon Interaction Networking](./weapon-networking.md).
 
-Example magazine transition:
+Reload-specific commit examples:
 
 ```text
-Weapon.MagazineWell → Hand → BodySlot or World
-BodySlot → Hand → Weapon.MagazineWell
+MagazineDetached
+MagazineLocked
+RoundInserted
+RoundChambered
+ShellInserted
+BoltOpened
+BoltClosed
+PumpBack
+PumpForward
+ReloadCompleted
 ```
 
-Example round transition:
-
-```text
-BodySlot → Hand → Chamber/Tube → Consumed/Inserted
-```
-
-For multiplayer, distinguish gameplay objects from visual objects.
-
-```text
-Gameplay object = server-owned inventory/ammo state.
-Visual object = locally animated representation.
-```
-
-If a dropped magazine can be picked up, the server spawns a replicated dropped magazine actor. If it is only cosmetic, clients can spawn local visuals.
-
----
-
-## Gameplay Commit Points
-
-Visual animation and gameplay state should be separated.
-
-Examples:
-
-```text
-Magazine becomes active at MagazineLock.
-Shell becomes loaded at ShellSeated.
-Round becomes chambered at ChamberCommit.
-Bolt cycle completes at BoltForwardComplete.
-```
-
-The hand may still be returning after gameplay commit.
-
-Optional gameplay rules:
-
-```text
-CannotFireDuringReload
-CanFireAfterCommit
-CanFireWithPenaltyAfterCommit
-CanFireOnlyWhenStableHoldRestored
-```
-
-The server must own these rules.
+Visual attachment may happen before gameplay commit, but gameplay state must commit only at the authoritative commit point.
 
 ---
 
 ## Interruption and Recovery
 
-Reload can be interrupted. The system must recover to a valid weapon hold state.
+Reload can be interrupted.
 
-Possible partial states:
+Common partial states:
 
 ```text
 old magazine removed
 new magazine in hand
-round in hand
-right hand away from main grip
-left hand away from support grip
+round/shell in hand
 bolt open
 pump partially moved
+main hand away from grip
+support hand away from grip
 ```
 
-Recovery rules:
+Recovery should restore a valid hold pose, not necessarily complete the reload.
 
-```text
-If weapon has no magazine and hand holds a magazine:
-  insert quickly or drop/stow and return to grip.
-
-If hand holds a round:
-  stow/drop round and return to grip, or finish insertion if allowed.
-
-If trigger/main hand is away from grip:
-  return it first if weapon stability is poor.
-
-If bolt or pump is partially operated:
-  complete or reset mechanism before returning to ready state.
-```
-
-The recovery target is not necessarily fully reloaded. It is a valid hold pose.
-
-In multiplayer, interruption is server-authoritative.
+Recovery planning is defined in [Weapon Solvers and Planning](./weapon-solvers-and-planning.md). Recovery animation is defined in [Weapon Animation Execution](./weapon-animation-execution.md).
 
 ---
 
-## Multiplayer Replication Model
+## Multiplayer Rule
 
-The server owns gameplay state. Clients own visual reconstruction.
+Reload is multiplayer-safe only if gameplay state is server-authoritative.
 
-Server authority:
+This document defines reload semantics. The multiplayer model is defined in [Weapon Interaction Networking](./weapon-networking.md).
 
-```text
-reload start validation
-reload intent
-ammo count
-magazine inventory state
-magazine attachment state
-round inserted state
-mechanism state
-commit points
-interrupt/recovery
-fire permission
-```
-
-Client visual reconstruction:
-
-```text
-hand IK targets
-weapon pose interpolation
-magazine movement
-round movement
-bolt/slide/pump visual motion
-minor timing offsets
-```
-
-Do not replicate per-frame hand IK, elbow positions, finger poses, or weapon part transforms.
-
-Replicate:
-
-```text
-reload sequence id
-current step index
-step start server time
-step duration
-resolved hand
-object visual attachment state
-mechanical state revision
-commit events
-interrupt/recovery state
-```
+The UE runtime implementation is defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
 
 ---
 
-## Replicated Reload Instance
+## MVP Reload Scope
 
-```cpp
-USTRUCT()
-struct FReplicatedReloadInstance
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    bool bIsReloading = false;
-
-    UPROPERTY()
-    FGameplayTag ReloadSequenceId;
-
-    UPROPERTY()
-    FGameplayTag CurrentStepId;
-
-    UPROPERTY()
-    uint8 StepIndex = 0;
-
-    UPROPERTY()
-    float StepStartServerTime = 0.f;
-
-    UPROPERTY()
-    float StepDuration = 0.f;
-
-    UPROPERTY()
-    EHand ResolvedHand = EHand::None;
-
-    UPROPERTY()
-    EReloadObjectType ObjectType;
-
-    UPROPERTY()
-    EReloadObjectVisualState ObjectVisualState;
-
-    UPROPERTY()
-    TObjectPtr<AActor> ReloadObjectActor;
-
-    UPROPERTY()
-    FGameplayTag CommitPoint;
-
-    UPROPERTY()
-    uint8 ReloadRevision = 0;
-};
-```
-
-Clients compute step phase from server time:
-
-```cpp
-float Alpha = (ServerTimeNow - StepStartServerTime) / StepDuration;
-```
-
-This allows late relevancy and late packet arrival to seek directly to the correct visual phase.
-
----
-
-## Replicated Weapon Mechanical State
-
-```cpp
-USTRUCT()
-struct FReplicatedWeaponMechanicalState
-{
-    GENERATED_BODY()
-
-    UPROPERTY()
-    bool bMagazineInserted = false;
-
-    UPROPERTY()
-    bool bMagazineLocked = false;
-
-    UPROPERTY()
-    bool bRoundChambered = false;
-
-    UPROPERTY()
-    bool bBoltOpen = false;
-
-    UPROPERTY()
-    bool bNeedsCycle = false;
-
-    UPROPERTY()
-    int32 AmmoInMagazine = 0;
-
-    UPROPERTY()
-    int32 AmmoInChamber = 0;
-
-    UPROPERTY()
-    uint8 StateRevision = 0;
-};
-```
-
-This is more useful than a single `AmmoCount` because it represents partial reload states.
-
----
-
-## Owning Client Prediction
-
-The owning client should start predicted visuals immediately after input.
+Minimum reload support:
 
 ```text
-Input Reload
-  ↓
-Start predicted visual reload
-  ↓
-ServerStartReload(ReloadIntent, WeaponNetId, ClientPredictionId)
-  ↓
-Server confirms or rejects
-```
-
-If confirmed:
-
-```text
-client aligns predicted reload with replicated server time
-```
-
-If rejected:
-
-```text
-client cancels predicted visuals and recovers to valid weapon hold pose
-```
-
-Common rejection reasons:
-
-```text
-no ammo
-weapon already busy
-invalid mechanical state
-character is sprinting/falling/climbing
-weapon profile invalid
-server state changed
-```
-
----
-
-## Remote Client Playback
-
-Remote clients do not need exact hand trajectories. They need the correct phase and state.
-
-On `OnRep_ReloadInstance`:
-
-```text
-resolve local reload profile
-compute current alpha from server time
-set visual object attachment state
-play/seek procedural visual step
-```
-
-If a remote client becomes relevant mid-reload, it should not replay from the beginning. It should reconstruct from the replicated step and timestamp.
-
----
-
-## UE Networking Pattern
-
-Recommended RPC/state pattern:
-
-```text
-Owning client:
-  ServerStartReload(ReloadIntent, WeaponNetId, ClientPredictionId)
-  ServerInterruptReload(Reason)
-
-Server replicated state:
-  FReplicatedReloadInstance
-  FReplicatedWeaponMechanicalState
-
-Optional cosmetic events:
-  ReloadStarted
-  ReloadStepChanged
-  MagazineDetached
-  MagazineAttachedToHand
-  MagazineDropped
-  MagazineLocked
-  RoundInserted
-  BoltOpened
-  BoltClosed
-  PumpBack
-  PumpForward
-  ReloadInterrupted
-  ReloadCompleted
-```
-
-Cosmetic multicast events may play sounds and effects, but gameplay results must come from replicated authoritative state.
-
----
-
-## Unreal Engine Implementation Notes
-
-Recommended runtime components:
-
-```text
-UProceduralWeaponManipulationComponent   // character-owned hand/contact/IK target state
-UWeaponInteractionComponent              // weapon sockets/profile/moving parts
-UWeaponReloadComponent                   // planner, executor, replication, commit points
-```
-
-Recommended data assets:
-
-```text
-UWeaponInteractionProfile
-UReloadSequenceProfile
-UAmmoObjectProfile
-UBodySlotProfile
-UWeaponReloadPolicy
-```
-
-Recommended animation flow:
-
-```text
-Reload planner resolves action plan
-Reload component replicates state and timings
-Runtime component updates hand/object/weapon targets
-AnimInstance receives targets
-Control Rig solves arms, shoulders, spine, hands
-Weapon skeletal mesh applies part bone offsets
-```
-
-The AnimBP should not decide reload logic. It should only consume targets and states.
-
----
-
-## Authoring Workflow
-
-Recommended editor workflow:
-
-```text
-1. Add sockets/bones to weapon skeletal mesh.
-2. Create WeaponInteractionProfile.
-3. Assign MainGrip, SupportGrip, Stock, Muzzle.
-4. Configure MagazineWell, Bolt, Slide, Pump, ShellInsert points as needed.
-5. Configure access regions and local axes.
-6. Assign compatible ammo/magazine object profiles.
-7. Run Validate Profile.
-8. Run Preview Reload.
-9. Inspect debug axes, hand paths, pre-insert/final poses, and rejected hand reasons.
-```
-
-Preview is required because most data errors are transform/axis errors.
-
----
-
-## Debug Requirements
-
-Debug view should show:
-
-```text
-MagazineWellSocket transform
-InsertAxis
-ExtractAxis
-PreInsertPose
-FinalInsertPose
-PreferredHand
-ResolvedHand
-Rejected hand reasons
-Reachability cost
-ActiveStabilizationContacts
-Weapon pose offset
-Object attachment state
-Gameplay commit point
-Reload step index and alpha
-Replicated server time phase
-Mechanical state revision
-```
-
-For angled magazines, debug must draw the socket axes. This is the easiest way to see whether the interaction point has been authored correctly.
-
----
-
-## MVP Requirements
-
-Minimum implementation:
-
-```text
-1. Weapon local-space sockets for grips, magazine well, bolt, muzzle.
-2. Magazine object with hand grip and insert tip sockets.
-3. Weapon profile validation.
-4. Hand assignment solver using access region, shoulder side, stability, and reachability cost.
-5. Stability check before releasing a hand.
-6. Straight-axis magazine extract/insert using socket axis.
-7. Body slot fetch for new magazine.
-8. Magazine attach/detach states.
-9. Optional bolt/slide operation.
-10. Return hands to valid weapon hold pose.
-11. Replicated ReloadInstance.
-12. Replicated WeaponMechanicalState.
-13. Owning client visual prediction.
-14. Remote client phase reconstruction from server time.
-15. Debug visualization for axes, contacts, step alpha, and replication phase.
-```
-
----
-
-## V2
-
-Add:
-
-```text
-single-round insertion
-shotgun shell loops
-rock-in magazine insertion
-left/right shoulder mirrored reload poses
-pistol-specific no-stock constraints
-interrupt recovery
-network event refinement
-Gameplay Tags for reload/mechanical states
-editor preview tooling
+1. Detachable magazine reload.
+2. Bottom magazine well.
+3. Weapon with main grip, support grip, optional stock.
+4. Magazine object with hand grip and insert tip.
+5. Straight-axis extract/insert using authored socket axis.
+6. MagazineDetached and MagazineLocked commit points.
+7. Return to valid weapon hold.
+8. Multiplayer phase/state support through networking layer.
 ```
 
 ---
@@ -1285,15 +607,13 @@ editor preview tooling
 
 ```text
 Procedural reload =
-  validated weapon profile
-  + hold-state aware hand assignment
-  + stabilized weapon contacts
-  + object attachment transitions
-  + socket-axis directed movement
-  + mechanical state commit points
-  + replicated reload phase
-  + client-side visual reconstruction
-  + return to valid weapon hold.
+  reload intent
+  + valid hold state
+  + authored interaction data
+  + planned hand/object/mechanism steps
+  + explicit animation phases
+  + mechanical commit points
+  + recovery path.
 ```
 
-The reload system should work for conventional weapons and unusual weapons because the weapon describes geometry and interaction semantics, not because code knows a specific weapon class.
+Reload works for conventional and unusual weapons because the weapon describes geometry and semantics; the code does not need a separate class for every weapon type.
