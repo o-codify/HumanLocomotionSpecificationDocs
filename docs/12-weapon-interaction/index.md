@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1245
+version: 26.602.1248
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -40,41 +40,29 @@ The engine-agnostic documents define the source of truth. The Unreal Engine docu
 
 ### Engine-Agnostic Documents
 
-```text
-weapon-holding.md
-```
+[Weapon Holding and Stabilization](./weapon-holding.md)
 
 Defines the current weapon hold pose, active contacts, shoulder side, stability requirements, temporary hand roles, reachability, stance constraints, and the rule that the weapon must never become an unsupported prop.
 
-```text
-weapon-interaction-data-model.md
-```
+[Weapon Interaction Data Model](./weapon-interaction-data-model.md)
 
 Defines weapon interaction points, access regions, hand policies, axes, feature flags, moving parts, ammo objects, body slots, and mechanical state in an engine-independent way.
 
-```text
-weapon-solvers-and-planning.md
-```
+[Weapon Solvers and Planning](./weapon-solvers-and-planning.md)
 
 Defines the hand assignment solver, reachability solver, stability solver, reload planner, action plan, dependency rules, fallback rules, and interruption recovery.
 
-```text
-procedural-reload.md
-```
+[Procedural Weapon Reloading](./procedural-reload.md)
 
 Defines procedural reload as an action sequence built on weapon holding, interaction points, object attachment states, socket-axis directed movement, mechanical state commits, and multiplayer state.
 
-```text
-weapon-networking.md
-```
+[Weapon Interaction Networking](./weapon-networking.md)
 
 Defines the multiplayer model: server authority, client prediction, remote-client reconstruction, replicated reload phase, mechanical state, visual object state, and commit points.
 
 ### Unreal Engine Implementation Documents
 
-```text
-weapon-interaction-profile-ue.md
-```
+[Weapon Interaction Profile for Unreal Engine](./weapon-interaction-profile-ue.md)
 
 Maps the engine-agnostic data model into UE 5.7 DataAssets, components, C++ structs, editor validation, preview tools, replication structs, and Mermaid implementation diagrams.
 
@@ -97,9 +85,9 @@ flowchart TD
     Data[Weapon Interaction Data Model]
     Holding[Weapon Holding and Stabilization]
     Solvers[Solvers and Planning]
-    Reload[Procedural Reload]
-    Net[Weapon Networking]
-    UE[Unreal Engine Implementation]
+    Reload[Procedural Weapon Reloading]
+    Net[Weapon Interaction Networking]
+    UE[Weapon Interaction Profile for Unreal Engine]
 
     Data --> Holding
     Data --> Solvers
