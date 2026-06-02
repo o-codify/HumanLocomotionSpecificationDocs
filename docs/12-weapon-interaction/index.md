@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1534
+version: 26.602.1556
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -17,9 +17,11 @@ Weapon interaction covers the physical/procedural relationship between a charact
 ```text
 holding weapons
 stabilizing weapons with hands/shoulder/support contacts
+hand-to-hand support for two-handed handgun poses
+cheek/sight alignment quality for stocked ADS presentation
 contact quality and hold pose lifecycle
 constraint priority and recovery when interaction goals conflict
-weapon-facing pose states such as relaxed carry, low ready, hip fire, point aim, and aim down sights
+weapon-facing pose states such as relaxed carry, low ready, NonADSFire/HipFire, point aim, and aim down sights
 interaction-facing fire readiness and fire visual response, without owning the fire backend
 compatibility with global full-body presentation mirroring
 procedural reloads as hand/object/weapon interaction
@@ -54,7 +56,7 @@ Defines shared terms used across the weapon interaction section: action step, st
 
 [Weapon Pose State Model](./weapon-pose-state-model.md)
 
-Defines weapon-in-hands pose states such as RelaxedCarry, LowReady, HighReady, HipFire, PointAim, AimDownSights, SprintingWithWeapon, Reloading, and ManipulatingMechanism as weapon/hand/contact states. It does not own locomotion speed or body orientation.
+Defines weapon-in-hands pose states such as RelaxedCarry, LowReady, HighReady, HipFire/NonADSFire, PointAim, AimDownSights, SprintingWithWeapon, Reloading, and ManipulatingMechanism as weapon/hand/contact states. It clarifies that sprint/cover variants are driven by external systems and do not own locomotion or cover logic.
 
 [Weapon Interaction Mirroring](./weapon-interaction-mirroring.md)
 
@@ -62,17 +64,17 @@ Defines how one canonical authored weapon interaction can support global full-bo
 
 [Weapon Aim and Fire Control](./weapon-aim-and-fire-control.md)
 
-Defines external aim intent consumption, hip fire, point aim, ADS, interaction fire readiness, muzzle/sight alignment, client prediction boundaries, and remote fire visual reconstruction from the interaction perspective. It does not own projectile simulation, damage, ammo economy, camera implementation, or the full fire backend.
+Defines external aim intent consumption, HipFire/NonADSFire, point aim, ADS, interaction fire readiness, muzzle/sight alignment, hand-to-hand handgun support, stocked ADS sight/cheek quality, client prediction boundaries, and remote fire visual reconstruction from the interaction perspective. It does not own projectile simulation, damage, ammo economy, camera implementation, or the full fire backend.
 
 ### Engine-Agnostic Interaction Documents
 
 [Weapon Holding and Stabilization](./weapon-holding.md)
 
-Defines the current weapon hold pose, active contacts, shoulder side, stability requirements, temporary hand roles, reachability, stance constraints, and the rule that the weapon must never become an unsupported prop.
+Defines the current weapon hold pose, active contacts, presentation side, stability requirements, temporary hand roles, archetype-specific support contacts, reachability, external stance constraints, and the rule that the weapon must never become an unsupported prop.
 
 [Weapon Contact Quality](./weapon-contact-quality.md)
 
-Defines discrete and continuous quality for hand, support, shoulder, object, and moving-part contacts, including hold stability score, contact confidence, degradation, recovery, and animation use.
+Defines procedural contact quality/confidence for hand, support, hand-to-hand, shoulder, cheek/sight, object, and moving-part contacts, including hold stability score, degradation, recovery, and animation use. It is not an exact physical grip simulation.
 
 [Weapon Hold Pose Lifecycle](./weapon-hold-pose-lifecycle.md)
 
@@ -146,7 +148,7 @@ Defines the near-implementation-level UE 5.7 runtime architecture for reload/man
 
 [Weapon Holding and Aiming Implementation for Unreal Engine](./weapon-holding-aiming-ue.md)
 
-Defines UE implementation for normal weapon-in-hands interaction behavior: `UWeaponPoseComponent`, `UWeaponAimComponent`, `UWeaponFireVisualComponent`, replicated pose state, replicated fire visual state, local aim interaction state, pose transitions, external fire readiness requests, fire visual responses, and AnimInstance/Control Rig integration for low ready, hip fire, ADS, and reload overlay.
+Defines UE implementation for normal weapon-in-hands interaction behavior: `UWeaponPoseComponent`, `UWeaponAimComponent`, `UWeaponFireVisualComponent`, replicated pose state, replicated fire visual state, local aim interaction state, pose transitions, external fire readiness requests, fire visual responses, and AnimInstance/Control Rig integration for low ready, HipFire/NonADSFire, ADS, and reload overlay.
 
 [Weapon Reload Object Lifecycle for Unreal Engine](./weapon-object-lifecycle-ue.md)
 
@@ -154,7 +156,7 @@ Defines gameplay object vs visual object handling from the interaction perspecti
 
 [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md)
 
-Maps the animation execution model into UE 5.7 AnimInstance state, Control Rig inputs, hand IK targets, elbow poles, weapon pose offsets, moving part animation, visual object attachment, animation LOD, mirroring compatibility, and remote-client playback.
+Maps the animation execution model into UE 5.7 AnimInstance state, Control Rig inputs, reachability, contact quality, hand-to-hand support, shoulder/cheek/sight quality, hand IK targets, elbow poles, weapon pose offsets, moving part animation, visual object attachment, animation LOD, mirroring compatibility, and remote-client playback.
 
 [Weapon Editor Preview and Validation for Unreal Engine](./weapon-editor-preview-ue.md)
 
@@ -164,7 +166,7 @@ Defines preview actor/component, validation reports, socket axis debug, hand ass
 
 [Weapon Interaction Authoring Guidelines](./weapon-authoring-guidelines.md)
 
-Defines practical authoring rules for sockets, local axes, grip points, support points, stock contact, magazine/object alignment, moving parts, naming, mirror-safe data, and preview checklist.
+Defines practical authoring rules for sockets, local axes, grip points, hand-to-hand handgun support, stock/cheek/sight references, magazine/object alignment, moving parts, naming, mirror-safe data, and preview checklist.
 
 [Weapon Interaction Debugging](./weapon-interaction-debugging.md)
 
@@ -180,7 +182,7 @@ Defines the compact MVP implementation checklist: files to create, types/tags, p
 
 [Weapon Holding Aiming and Fire Tests](./weapon-holding-aiming-tests.md)
 
-Defines tests for low ready, hip fire, ADS, sprint pose interaction, interaction fire readiness, reload overlay entry/exit, fire visual response, remote fire visual reconstruction, late relevancy, shoulder switching, and weapon switch cleanup.
+Defines tests for low ready, HipFire/NonADSFire, ADS, sprint pose interaction, interaction fire readiness, reload overlay entry/exit, fire visual response, remote fire visual reconstruction, late relevancy, shoulder switching, and weapon switch cleanup.
 
 [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md)
 
@@ -388,7 +390,7 @@ Terminology:
   defines shared names and prevents ambiguous state names.
 
 Pose state model:
-  defines weapon/hand/contact pose states and how temporary interactions enter/exit them.
+  defines weapon/hand/contact pose states and how temporary interactions enter/exit them, including external-state-driven sprint/cover variants.
 
 Mirroring:
   defines how canonical weapon interaction supports global full-body mirrored presentation without changing gameplay hand roles.
@@ -397,7 +399,7 @@ Aim/fire control:
   defines interaction-facing aim and fire readiness state, not the full fire backend.
 
 Contact quality:
-  defines how strong, weak, partial, slipping, lost, or recovering interaction contacts are.
+  defines procedural confidence/quality for hand, hand-to-hand, shoulder, cheek/sight, object, and moving-part contacts.
 
 Hold pose lifecycle:
   defines enter, stabilize, maintain, disrupt, recover, exit, and fail phases for weapon poses.
@@ -409,7 +411,7 @@ Data model:
   defines what weapon interaction points, contacts, axes, moving parts, and visual reload objects exist.
 
 Holding system:
-  defines current contacts and weapon stability.
+  defines current contacts, weapon stability, archetype-specific support, and procedural reachability.
 
 Solvers/planner:
   decide weapon interaction hand roles, reachability, stability, and manipulation plans.
@@ -457,13 +459,13 @@ UE object lifecycle:
   separates external gameplay object concepts from visual interaction object state.
 
 UE animation implementation:
-  maps runtime interaction targets into AnimInstance and Control Rig.
+  maps runtime interaction targets into AnimInstance and Control Rig, including reachability, contact quality, hand-to-hand support, and stocked ADS presentation contacts.
 
 UE editor preview:
   validates authored sockets, axes, sequences, hand assignments, and mirrored presentation before runtime.
 
 Authoring guidelines:
-  define how artists/technical animators should place sockets, axes, interaction points, object sockets, moving parts, and mirror-safe data.
+  define how artists/technical animators should place sockets, axes, interaction points, object sockets, moving parts, hand-to-hand support data, cheek/sight references, and mirror-safe data.
 
 Debugging:
   defines unified debug overlays and vocabulary for interaction state, constraints, contacts, objects, mirroring, networking, prediction, and LOD.
@@ -491,6 +493,8 @@ Weapon interaction =
   + shared terminology
   + weapon/hand/contact pose states
   + contact quality
+  + hand-to-hand handgun support
+  + shoulder/cheek/sight ADS presentation contacts
   + hold pose lifecycle
   + constraint priority
   + global presentation mirroring compatibility
