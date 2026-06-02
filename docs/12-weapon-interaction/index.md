@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1449
+version: 26.602.1456
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -18,7 +18,7 @@ Weapon interaction covers the physical/procedural relationship between a charact
 holding weapons
 stabilizing weapons with hands/shoulder/support contacts
 weapon-facing pose states such as relaxed carry, low ready, hip fire, point aim, and aim down sights
-weapon interaction readiness for fire, without owning the fire backend
+interaction-facing fire readiness and fire visual response, without owning the fire backend
 procedural reloads as hand/object/weapon interaction
 magazine and ammo-object visual manipulation as interaction objects
 bolt/slide/pump/charging-handle operation as mechanism interaction
@@ -54,7 +54,7 @@ Defines weapon-in-hands pose states such as RelaxedCarry, LowReady, HighReady, H
 
 [Weapon Aim and Fire Control](./weapon-aim-and-fire-control.md)
 
-Defines aim source, aim target, hip fire, point aim, ADS, fire readiness, muzzle-vs-camera relationship, client prediction boundaries, and remote fire visualization from the interaction perspective. It does not own projectile simulation, damage, ammo economy, or the full fire backend.
+Defines external aim intent consumption, hip fire, point aim, ADS, interaction fire readiness, muzzle/sight alignment, client prediction boundaries, and remote fire visual reconstruction from the interaction perspective. It does not own projectile simulation, damage, ammo economy, camera implementation, or the full fire backend.
 
 ### Engine-Agnostic Interaction Documents
 
@@ -106,7 +106,7 @@ Defines the near-implementation-level UE 5.7 runtime architecture for reload/man
 
 [Weapon Holding and Aiming Implementation for Unreal Engine](./weapon-holding-aiming-ue.md)
 
-Defines UE implementation for normal weapon-in-hands interaction behavior: `UWeaponPoseComponent`, `UWeaponAimComponent`, `UWeaponFireComponent` as interaction-facing bridges, replicated pose/fire interaction state, local aim state, pose transitions, fire requests, fire visualization replication, and AnimInstance/Control Rig integration for low ready, hip fire, ADS, and reload overlay.
+Defines UE implementation for normal weapon-in-hands interaction behavior: `UWeaponPoseComponent`, `UWeaponAimComponent`, `UWeaponFireVisualComponent`, replicated pose state, replicated fire visual state, local aim interaction state, pose transitions, external fire readiness requests, fire visual responses, and AnimInstance/Control Rig integration for low ready, hip fire, ADS, and reload overlay.
 
 [Weapon Reload Object Lifecycle for Unreal Engine](./weapon-object-lifecycle-ue.md)
 
@@ -132,7 +132,7 @@ Defines the compact MVP implementation checklist: files to create, types/tags, p
 
 [Weapon Holding Aiming and Fire Tests](./weapon-holding-aiming-tests.md)
 
-Defines tests for low ready, hip fire, ADS, sprint pose interaction, fire readiness validation from interaction state, reload overlay entry/exit, server rejection during reload, remote fire visualization reconstruction, late relevancy, shoulder switching, and weapon switch cleanup.
+Defines tests for low ready, hip fire, ADS, sprint pose interaction, interaction fire readiness, reload overlay entry/exit, fire visual response, remote fire visual reconstruction, late relevancy, shoulder switching, and weapon switch cleanup.
 
 [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md)
 
@@ -326,7 +326,7 @@ UE runtime implementation:
   owns reload/manipulation components, replicated structs, RPCs, OnRep handlers, executor loop, prediction, and tick/update order for weapon interaction.
 
 UE holding/aiming implementation:
-  owns interaction-facing pose state, aim state, fire requests, fire visualization state, and pose/aim animation bridge.
+  owns interaction-facing pose state, aim interaction state, fire readiness requests, fire visual state, and pose/aim animation bridge.
 
 UE object lifecycle:
   separates external gameplay object concepts from visual interaction object state.
