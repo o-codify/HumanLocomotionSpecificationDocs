@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1248
+version: 26.602.1320
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -21,6 +21,7 @@ procedural reloads
 magazine and ammo object manipulation
 bolt/slide/pump/charging-handle operation
 hand assignment and reachability solving
+animation execution for reaching/gripping/manipulation
 multiplayer-safe gameplay state
 Unreal Engine implementation mapping
 ```
@@ -52,6 +53,10 @@ Defines weapon interaction points, access regions, hand policies, axes, feature 
 
 Defines the hand assignment solver, reachability solver, stability solver, reload planner, action plan, dependency rules, fallback rules, and interruption recovery.
 
+[Weapon Animation Execution](./weapon-animation-execution.md)
+
+Defines how validated action plans become visible upper-body animation: reach trajectories, pre-grip, grip/contact phases, object visual attachment, weapon pose offsets, spine/shoulder assistance, elbow control, moving part following, animation LOD, and recovery animation.
+
 [Procedural Weapon Reloading](./procedural-reload.md)
 
 Defines procedural reload as an action sequence built on weapon holding, interaction points, object attachment states, socket-axis directed movement, mechanical state commits, and multiplayer state.
@@ -66,14 +71,32 @@ Defines the multiplayer model: server authority, client prediction, remote-clien
 
 Maps the engine-agnostic data model into UE 5.7 DataAssets, components, C++ structs, editor validation, preview tools, replication structs, and Mermaid implementation diagrams.
 
+[Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md)
+
+Maps the animation execution model into UE 5.7 AnimInstance state, Control Rig inputs, hand IK targets, elbow poles, weapon pose offsets, moving part animation, visual object attachment, animation LOD, and remote-client playback.
+
 Future UE implementation documents may be added for:
 
 ```text
-Control Rig setup
-AnimInstance integration
 Editor preview tooling
 Gameplay Ability System integration
 network prediction details
+weapon component source layout
+```
+
+---
+
+## Recommended Reading Order
+
+```text
+1. Weapon Interaction Data Model
+2. Weapon Holding and Stabilization
+3. Weapon Solvers and Planning
+4. Weapon Animation Execution
+5. Procedural Weapon Reloading
+6. Weapon Interaction Networking
+7. Weapon Interaction Profile for Unreal Engine
+8. Weapon Animation and Control Rig for Unreal Engine
 ```
 
 ---
@@ -84,21 +107,28 @@ network prediction details
 flowchart TD
     Data[Weapon Interaction Data Model]
     Holding[Weapon Holding and Stabilization]
-    Solvers[Solvers and Planning]
+    Solvers[Weapon Solvers and Planning]
+    AnimExec[Weapon Animation Execution]
     Reload[Procedural Weapon Reloading]
     Net[Weapon Interaction Networking]
-    UE[Weapon Interaction Profile for Unreal Engine]
+    UEProfile[Weapon Interaction Profile for Unreal Engine]
+    UERig[Weapon Animation and Control Rig for Unreal Engine]
 
     Data --> Holding
     Data --> Solvers
     Holding --> Solvers
+    Solvers --> AnimExec
     Solvers --> Reload
+    AnimExec --> Reload
     Reload --> Net
-    Data --> UE
-    Holding --> UE
-    Solvers --> UE
-    Reload --> UE
-    Net --> UE
+    Data --> UEProfile
+    Holding --> UEProfile
+    Solvers --> UEProfile
+    Reload --> UEProfile
+    Net --> UEProfile
+    AnimExec --> UERig
+    UEProfile --> UERig
+    Net --> UERig
 ```
 
 ---
@@ -117,14 +147,17 @@ Holding system:
 Solvers/planner:
   decide what should happen.
 
+Animation execution:
+  turns a validated plan into hand/object/weapon targets.
+
 Reload executor:
-  performs steps over time.
+  performs steps over time and applies commit points.
 
 Networking layer:
   replicates gameplay state and phase, not IK every frame.
 
 Engine implementation:
-  maps these rules to components, assets, animation systems, and editor tools.
+  maps these rules to components, assets, animation systems, networking, and editor tools.
 ```
 
 ---
@@ -137,6 +170,7 @@ Weapon interaction =
   + current hold state
   + solver decisions
   + action plans
+  + animation execution targets
   + gameplay mechanical state
   + network-safe replication
   + engine-specific animation execution.
