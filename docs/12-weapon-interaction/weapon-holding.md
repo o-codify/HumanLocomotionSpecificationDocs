@@ -2,7 +2,7 @@
 id: weapon-holding-and-stabilization
 title: Weapon Holding and Stabilization
 status: draft
-version: 26.602.1236
+version: 26.602.1552
 tags: [ weapon, upper-body, ik, procedural-animation, unreal-engine, multiplayer ]
 ---
 
@@ -12,7 +12,7 @@ tags: [ weapon, upper-body, ik, procedural-animation, unreal-engine, multiplayer
 
 This document defines how the Human Locomotion System represents a character holding a weapon before, during, and after weapon interaction tasks.
 
-Weapon interaction is not allowed to start from an abstract empty pose. The character already holds the weapon. Reloading, cycling a bolt, inserting a shell, changing a magazine, or operating a mechanism is a temporary modification of the current weapon hold pose.
+Weapon interaction is not allowed to start from an abstract empty pose. The character already holds the weapon. Reloading, cycling a bolt, inserting a shell, changing a magazine, drawing, holstering, or operating a mechanism is a temporary modification of the current weapon hold pose.
 
 The core rule is:
 
@@ -20,7 +20,7 @@ The core rule is:
 A weapon must always have a valid stabilization state.
 ```
 
-In normal combat handling this means at least one hand, shoulder, sling, bipod, surface, or other valid support contact must stabilize the weapon while another hand performs a task.
+In normal combat handling this means at least one valid hand, shoulder, sling, bipod, surface, hand-to-hand, or other support contact must stabilize the weapon while another hand performs a task.
 
 ---
 
@@ -33,20 +33,28 @@ right hand always holds
 left hand always reloads
 ```
 
-Instead, every action is resolved from:
+Instead, every action is resolved from canonical authored interaction data:
 
 ```text
 Current weapon pose
-+ current shoulder side
++ canonical hand roles
++ global presentation mirror state
 + weapon interaction geometry
-+ active grip contacts
++ active grip/contact quality
 + required stabilization
 + hand reachability
 + action access side
-→ resolved hand assignment and stabilization plan
+→ resolved canonical hand assignment and stabilization plan
+→ optional mirrored presentation output
 ```
 
-The same character may use the right hand as a trigger hand in one pose and as a manipulation hand in another pose.
+Important:
+
+```text
+Global left/right shoulder presentation mirroring is not a real gameplay swap of main/support hand roles.
+```
+
+The canonical authored interaction may use right-hand main grip and left-hand support grip, while the final character presentation is globally mirrored by the animation/presentation layer.
 
 ---
 
@@ -65,7 +73,10 @@ Examples:
 ```text
 MainGripSocket
 SupportGripSocket
+HandToHandSupportReference optional
 StockShoulderSocket
+CheekReferenceSocket optional
+SightReferenceSocket optional
 MagazineWellSocket
 BoltSocket
 ChargingHandleSocket
@@ -77,7 +88,64 @@ MuzzleSocket
 At runtime the system converts:
 
 ```text
-Weapon local space → character/world space → hand IK targets
+Weapon local space → canonical character/world space → optional mirrored presentation space → hand IK targets
+```
+
+---
+
+## Weapon Hold Archetypes
+
+Different weapons use different contact models.
+
+### One-Handed Pistol
+
+```text
+MainHandGrip: required
+SupportGripSocket: not required
+HandToHandSupportContact: optional
+ShoulderContact: none
+CheekContact: none
+```
+
+The weapon is mainly stabilized by the main hand unless a two-handed pose is requested.
+
+### Two-Handed Handgun
+
+```text
+MainHandGrip: required
+HandToHandSupportContact: preferred or required by pose
+SupportHand may support the main hand and/or weapon frame
+ShoulderContact: none
+CheekContact: none
+```
+
+For handgun handling, the support hand often does not simply attach to a separate weapon socket. It may wrap around or brace the main hand. The system should support:
+
+```text
+SupportHandToMainHandContact
+SupportHandToWeaponFrameContact optional
+CombinedTwoHandGripPose
+```
+
+### Stocked Rifle / Long Gun
+
+```text
+MainHandGrip: required
+SupportGrip: preferred or required
+ShoulderContact: preferred or required by pose
+CheekContact: optional/preferred for ADS presentation
+SightEyeAlignmentQuality: required for ADS-ready presentation
+```
+
+A stock changes the interaction model because it provides an additional support contact.
+
+### Pump / Foregrip Weapon
+
+```text
+MainHandGrip: required
+SupportGrip or PumpGrip: required when operating pump/foregrip
+MovingPartContactQuality: required during manipulation phase
+ShoulderContact: weapon/pose dependent
 ```
 
 ---
@@ -122,7 +190,9 @@ Sockets or scene markers are enough for static points:
 ```text
 main grip
 support grip
+hand-to-hand support reference
 stock shoulder contact
+cheek/sight reference for ADS presentation
 magazine well
 magazine pre-insert point
 shell insert point
@@ -145,13 +215,15 @@ struct FCharacterWeaponInteractionState
 {
     ECharacterStance Stance;          // Stand, Crouch, Prone
     EMovementState Movement;          // Idle, Walk, Run, Sprint, Falling
-    EWeaponPose WeaponPose;           // Aimed, LowReady, HipReady, ReloadPose
-    EShoulderSide ShoulderSide;       // Right, Left
+    EWeaponPose WeaponPose;           // LowReady, HipFire, ADS, Reloading, etc.
+    EPresentationSide PresentationSide; // RightShoulderView, LeftShoulderView
     bool bIsAiming;
-    bool bIsSprinting;
-    bool bIsInCover;
+    bool bIsSprintingFromExternalLocomotion;
+    bool bIsInCoverFromExternalCoverSystem;
 };
 ```
+
+`PresentationSide` may drive global mirroring. It is not a gameplay hand-role swap.
 
 ### Hand state
 
@@ -159,7 +231,7 @@ struct FCharacterWeaponInteractionState
 struct FHandInteractionState
 {
     EHand Hand;
-    EHandRole CurrentRole;            // MainGrip, SupportGrip, Free, Manipulating
+    EHandRole CurrentRole;            // MainGrip, SupportGrip, HandToHandSupport, Free, Manipulating
     FName AttachedSocket;
     TObjectPtr<UObject> HeldObject;
     bool bCanRelease;
@@ -175,17 +247,22 @@ struct FWeaponHoldState
     FName MainGripSocket;
     FName SupportGripSocket;
     FName ActiveShoulderSocket;
+    FName CheekReferenceSocket;
+    FName SightReferenceSocket;
 
-    EShoulderSide ShoulderSide;
+    EPresentationSide PresentationSide;
 
-    bool bRightHandContact;
-    bool bLeftHandContact;
+    bool bMainGripContact;
+    bool bSupportGripContact;
+    bool bHandToHandSupportContact;
     bool bShoulderContact;
+    bool bCheekContact;
     bool bSlingContact;
     bool bBipodContact;
     bool bSurfaceContact;
 
     float StabilityScore;
+    float SightEyeAlignmentQuality;
     EWeaponPose PreviousWeaponPose;
 };
 ```
@@ -199,55 +276,54 @@ Weapon holding is represented as a set of contacts.
 Minimum contact types:
 
 ```text
-RightHandContact
-LeftHandContact
-ShoulderContact
+MainGripContact
+SupportGripContact or HandToHandSupportContact depending on archetype
 ```
 
 Extended contact types:
 
 ```text
+ShoulderContact
 CheekContact
+SightEyeAlignment
 SlingContact
 BipodContact
 SurfaceContact
 BodyClampContact
+MovingPartContact
+ObjectContact
 ```
 
-A contact can be active, inactive, transitioning, or temporarily reserved for a manipulation action.
+A contact can be active, inactive, transitioning, partial, slipping, recovering, blocked, lost, or temporarily reserved for a manipulation action.
 
 ---
 
-## Shoulder Side
+## Presentation Side And Mirroring
 
-Shoulder side is critical. It changes which hand is naturally free for top or bottom manipulation.
+Weapon interaction does not implement a true left-handed/right-handed gameplay model here.
 
-```text
-RightShoulderStance
-LeftShoulderStance
-```
+The authored base interaction is canonical. A global presentation mirror may display the whole character/weapon stance on the opposite side.
 
-Example right-shoulder stance:
+Correct model:
 
 ```text
-RightHand may be on MainGrip
-LeftHand may be on SupportGrip
-RightShoulderContact active
+canonical interaction plan
++ PresentationSide / MirrorState
+→ presented pose
 ```
 
-Example left-shoulder stance:
+Incorrect model:
 
 ```text
-LeftHand may be on MainGrip
-RightHand may be on SupportGrip
-LeftShoulderContact active
+duplicate left-handed reload plan by default
+runtime hand-role swap as a separate gameplay system
 ```
 
-The system must not assume that the right hand is always the main grip hand.
+If a weapon mesh/control layout is not mirrored, weapon-side interaction points remain the authored truth. Do not invent mirrored bolt handles, ejection ports, or controls that do not exist.
 
 ---
 
-## Hand Roles Are Temporary
+## Hand Roles Are Interaction Roles
 
 The system should avoid permanent labels such as:
 
@@ -256,16 +332,17 @@ right hand = primary
 left hand = support
 ```
 
-Instead, roles are resolved per current pose and current action:
+Instead, roles are resolved in canonical interaction space:
 
 ```text
-TriggerHand
-ForegripHand
+MainGripHand
+SupportGripHand
+HandToHandSupportHand
 ManipulationHand
 StabilizingHand
 ```
 
-These roles may change during a sequence.
+Presentation mirroring may visually move the whole pose to the other side without creating a different gameplay hand-role model.
 
 ---
 
@@ -274,30 +351,36 @@ These roles may change during a sequence.
 Before a hand releases its current grip, the system must check whether the weapon remains stable.
 
 ```text
-CanReleaseHand(hand)?
+CanReleaseContact(contact)?
 ```
 
 The check evaluates:
 
 ```text
 remaining hand contacts
+hand-to-hand support contact for handgun poses
 shoulder contact
-weapon weight and length
-weapon type
+cheek/sight alignment if ADS presentation requires it
+weapon size and length
+weapon archetype
 stock presence
 sling/bipod/surface support
 current pose
 required action stability
+contact quality values
 ```
 
 Examples:
 
 ```text
 Rifle with stock:
-  One hand + shoulder can temporarily stabilize the weapon.
+  Main grip + shoulder contact may temporarily stabilize the weapon.
+
+Two-handed handgun:
+  Support hand may stabilize by bracing the main hand, not by occupying a separate support socket.
 
 Pistol without stock:
-  The trigger hand usually cannot release the weapon unless the other hand first grabs the weapon body.
+  The main hand usually cannot release the weapon unless another valid support or transfer state is explicitly authored.
 
 Heavy weapon:
   Releasing one hand may require bipod, sling, or surface support.
@@ -305,17 +388,34 @@ Heavy weapon:
 
 ---
 
-## Stock and Shoulder Contact
+## Stock, Shoulder, Cheek, and Sight Contacts
 
 A stock changes the interaction model because it provides an additional stabilization contact.
 
 With a stock:
 
 ```text
-grip hand + shoulder contact
+main grip + shoulder contact
 ```
 
 may be enough to free the other hand.
+
+For ADS presentation on stocked weapons, the system may also evaluate:
+
+```text
+CheekContactQuality
+SightEyeAlignmentQuality
+```
+
+These are presentation/interaction qualities, not camera ownership.
+
+They help decide:
+
+```text
+is ADS visually settled?
+can ADS-ready interaction state be reported?
+should weapon/hand targets continue settling?
+```
 
 Without a stock:
 
@@ -323,7 +423,7 @@ Without a stock:
 one hand alone may be the only valid support
 ```
 
-This affects bolt operation, magazine changes, and shell insertion. The solver must not blindly assign the same-side hand if that hand is the only thing holding the weapon.
+This affects bolt operation, magazine changes, shell insertion, and mechanism manipulation. The solver must not blindly release the only stabilizing contact.
 
 ---
 
@@ -352,13 +452,13 @@ Manipulation
 ReturnPose
 ```
 
-Reload poses should support mirroring for left-shoulder and right-shoulder handling.
+Reload poses should support global presentation mirroring through the mirroring system, not through separate duplicated left/right gameplay plans by default.
 
 ---
 
 ## Muzzle Control During Manipulation
 
-The system must define how much the weapon keeps its aim during manipulation.
+The system must define how much the weapon keeps its visual aim relationship during manipulation.
 
 Possible policies:
 
@@ -375,7 +475,7 @@ For normal gameplay, the recommended default is:
 KeepAimApproximate + reload pose offset
 ```
 
-The muzzle stays generally aligned with the character/camera direction but is allowed to lower, roll, or offset enough to expose the interaction point.
+The muzzle stays generally aligned with external aim intent but is allowed to lower, roll, or offset enough to expose the interaction point.
 
 ---
 
@@ -384,8 +484,8 @@ The muzzle stays generally aligned with the character/camera direction but is al
 Every interaction point on the weapon has an access region.
 
 ```text
-Left
-Right
+CanonicalLeft
+CanonicalRight
 Top
 Bottom
 Front
@@ -397,42 +497,33 @@ BottomRight
 Custom
 ```
 
-Side access normally prefers the same-side hand:
+Access regions are authored in canonical weapon interaction space. Presentation mirroring transforms final visuals; it should not automatically rewrite semantic access ids into a separate gameplay plan.
 
-```text
-Right access → prefer RightHand
-Left access  → prefer LeftHand
-```
-
-Top or bottom access normally depends on shoulder side:
-
-```text
-Right shoulder → prefer LeftHand
-Left shoulder  → prefer RightHand
-```
-
-This is only a preference. Final assignment must also pass stability and reachability checks.
+Final assignment must pass stability, contact quality, and reachability checks.
 
 ---
 
 ## Cost-Based Hand Assignment Solver
 
-The Hand Assignment Solver chooses the manipulation hand and stabilization contacts for an action.
+The Hand Assignment Solver chooses the manipulation hand and stabilization contacts for an action in canonical interaction space.
 
 Input:
 
 ```text
-CurrentShoulderSide
+Canonical hand roles
+PresentationMirrorState
 CurrentGripState
 WeaponHasStock
+WeaponArchetype
 WeaponLength
-WeaponWeight
+WeaponWeightClass
 InteractionPoint.AccessRegion
 InteractionPoint.LocalTransform
 InteractionPoint.RequiredDirection
 ActionType
 AvailableContacts
-Character stance and movement state
+ContactQualityState
+Character stance and external movement state
 ```
 
 Output:
@@ -440,33 +531,33 @@ Output:
 ```text
 ManipulationHand
 StabilizationContacts
-RequiredRegrip
-RequiredWeaponPoseAdjustment
-ReturnGrip
+RequiredPoseAdjustment
+ReturnContact
 ReachabilityCost
 RejectedHandReasons
 ```
 
-The solver should evaluate both hands with a cost model:
+The solver should evaluate valid canonical candidates with a cost model:
 
 ```text
 Cost =
-  side mismatch penalty
+  access mismatch penalty
 + reach distance penalty
 + weapon instability penalty
-+ regrip penalty
-+ torso twist penalty
++ contact break penalty
++ pose adjustment penalty
 + current hand busy penalty
 + stance constraint penalty
++ mirrored presentation risk penalty if applicable
 ```
 
-The selected hand is the valid candidate with the lowest cost. If no candidate is valid, the system must insert a regrip, modify weapon pose, or block the action.
+The selected plan is the valid candidate with the lowest cost. If no candidate is valid, the system must modify weapon pose, recover contacts, or block the action.
 
 ---
 
 ## Reachability Result
 
-The system does not need full biomechanical simulation for MVP, but it needs a simple reachability test.
+The system does not need full biomechanical simulation for MVP, but it needs more than a simple distance check.
 
 ```cpp
 struct FReachabilityResult
@@ -474,8 +565,10 @@ struct FReachabilityResult
     bool bReachable;
     float Cost;
     bool bRequiresWeaponRoll;
-    bool bRequiresTorsoTwist;
-    bool bRequiresRegrip;
+    bool bRequiresShoulderOrClavicleAssist;
+    bool bRequiresPoseAdjustment;
+    bool bViolatesWristComfort;
+    bool bViolatesElbowPolePreference;
 };
 ```
 
@@ -484,37 +577,26 @@ The reachability test should consider:
 ```text
 hand-to-target distance
 max arm extension
-shoulder twist
+elbow pole validity
+wrist comfort
+shoulder/clavicle assist request
 current stance
 weapon roll/tilt allowance
 simple body/weapon collision avoidance
+current contact quality
 ```
 
----
-
-## Regrip
-
-Regrip is a short transition that changes weapon contacts before an action.
-
-Examples:
-
-```text
-LeftHand takes stronger support grip before RightHand operates right-side bolt.
-RightHand grabs weapon body before LeftHand releases support.
-Weapon is rolled inward before bottom magazine insertion.
-```
-
-Regrip is not optional for correctness. It prevents the weapon from visually floating or losing support.
+This is still procedural reachability, not full anatomical simulation.
 
 ---
 
 ## Stance Constraints
 
-The hold solver must consider stance-specific restrictions.
+The hold solver may read external stance/movement state as input.
 
 ```text
 Standing:
-  Most reload poses are available.
+  Most interaction poses are available.
 
 Crouch:
   Weapon lowering and body slot access may be reduced.
@@ -522,34 +604,37 @@ Crouch:
 Prone:
   Bottom magazine insertion may collide with ground.
   Large magazines may require weapon roll.
-  Some reload variants may be blocked.
+  Some interaction variants may be blocked.
 
-Sprint:
-  Interaction is usually blocked or converted into a lowered reload pose.
+Sprint from external locomotion state:
+  Weapon interaction may switch to a sprint-compatible hold pose or block fine manipulation.
 
-Falling / climbing:
-  Most reload tasks should be blocked or interrupted.
+Falling / climbing from external locomotion state:
+  Most fine manipulation tasks should be blocked or interrupted.
 ```
+
+Weapon interaction does not compute locomotion speed or own the movement mode.
 
 ---
 
 ## Return State
 
-Every manipulation action must define where the hand returns.
+Every manipulation action must define where the hand/contact returns.
 
 ```text
 ReturnToMainGrip
 ReturnToSupportGrip
+ReturnToHandToHandSupport
 StayOnPumpGrip
-ReturnToTwoHandPistolSupport
 ContinueToNextAction
 ```
 
 At the end of the full sequence, the weapon must return to a valid hold state:
 
 ```text
-both hands restored when required
-shoulder contact restored when required
+required contacts restored
+hand-to-hand handgun support restored when required
+shoulder/cheek/sight contacts restored when required by pose
 weapon pose restored or updated
 weapon stability valid
 ```
@@ -576,17 +661,19 @@ Weapon Skeletal Mesh
 WeaponInteractionProfile DataAsset
   semantic descriptions
   access regions
-  hand policies
+  hand/contact policies
   required stability
+  contact quality thresholds
   insert/extract/operate axes
 ```
 
 The animation pipeline should be:
 
 ```text
-Runtime solver computes targets
+Runtime solver computes canonical targets
+Presentation system applies optional global mirroring
 AnimInstance receives targets and state
-Control Rig / IK Rig solves hands, arms, spine, shoulders
+Control Rig / IK Rig solves hands, arms, shoulders/clavicle assist, and weapon contacts
 Weapon component applies procedural part movement
 ```
 
@@ -596,60 +683,42 @@ The AnimBP should not own the weapon interaction logic. It should apply the alre
 
 ## Multiplayer Rule
 
-Weapon holding and contact state can influence gameplay, but the server must not evaluate full IK.
+Weapon holding and contact state can influence interaction readiness, but the server must not evaluate full IK.
 
 Server authority:
 
 ```text
-weapon equipped state
+weapon equipped/reference state from external system
 active weapon pose category
-whether weapon is in a valid gameplay hold state
-reload/fire/block permissions
+whether weapon is in a valid interaction hold state
+interaction readiness/block state
+interaction phase/commit state
 ```
 
-Client visual authority:
+Client / animation responsibility:
 
 ```text
-hand IK targets
-spine offsets
+exact hand IK
 finger pose
-minor contact blending
-weapon pose interpolation
+weapon pose offsets
+shoulder/cheek visual settle
+local smoothing
 ```
 
-For networking, replicate state and time, not per-frame hand transforms.
-
----
-
-## Debug Requirements
-
-Debug visualization should show:
-
-```text
-active hand contacts
-active shoulder contact
-current shoulder side
-weapon stability score
-preferred hand
-resolved hand
-access region
-regrip requirement
-return grip
-reachability cost
-rejected hand reasons
-stance constraint result
-```
-
-This is required because most bugs in this system are not animation bugs. They are invalid contact-state bugs.
+Replicate state/phase/time/revision, not every IK transform.
 
 ---
 
 ## Final Formula
 
 ```text
-Weapon holding = contacts + pose + shoulder side + stability rules + reachability.
+Weapon holding =
+  canonical interaction roles
+  + weapon-local contacts
+  + contact quality
+  + weapon archetype rules
+  + stabilization requirements
+  + procedural reachability
+  + optional mirrored presentation
+  + valid return pose.
 ```
-
-Weapon manipulation is valid only when it is planned on top of that holding state.
-
-The weapon must never be treated as an unsupported prop while the hands perform procedural actions.
