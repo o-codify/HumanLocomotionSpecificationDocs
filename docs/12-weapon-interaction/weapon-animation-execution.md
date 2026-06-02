@@ -2,7 +2,7 @@
 id: weapon-animation-execution
 title: Weapon Animation Execution
 status: draft
-version: 26.602.1319
+version: 26.602.1338
 tags: [ weapon, animation, upper-body, ik, procedural-animation, reaching, grasping ]
 ---
 
@@ -15,6 +15,25 @@ This document defines the engine-agnostic animation execution model for weapon i
 It explains how a validated weapon interaction plan becomes visible upper-body motion: hand trajectories, grip phases, weapon pose offsets, object attachment timing, mechanism following, and return-to-hold behavior.
 
 This document does not describe Unreal Engine classes directly. The Unreal Engine implementation is defined in [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md).
+
+---
+
+## Evidence Boundary
+
+This document uses common findings from human reaching and grasping research as practical animation guidance, not as a claim of exact biomechanical simulation.
+
+In particular:
+
+```text
+smooth acceleration/deceleration
+bell-shaped velocity-like timing
+non-teleporting reach phases
+pre-grip/contact/release structure
+```
+
+are recommended because they usually produce more human-like motion than constant-speed linear interpolation.
+
+The system is still a game animation system. It is not a medical or biomechanical simulator.
 
 ---
 
@@ -74,7 +93,7 @@ flowchart TD
 
 ## Main Rule
 
-Animation execution should not be a linear hand teleport between two points.
+Animation execution should not be a constant-speed linear hand teleport between two points.
 
 Every manipulation should be decomposed into phases:
 
@@ -96,7 +115,7 @@ These phases may be short, but they prevent the motion from looking robotic and 
 
 ## Hand Trajectory Model
 
-The hand trajectory should use smooth easing and an arced path.
+The hand trajectory should use smooth easing and an arced or controlled path.
 
 Minimum MVP trajectory:
 
@@ -118,6 +137,8 @@ wrist orientation blended separately from position
 ```
 
 The motion should feel like a reach, not a straight robotic slide.
+
+This is an animation approximation. The exact curve can be implemented as a Bezier curve, Hermite curve, authored curve, or per-step animation curve.
 
 ---
 
