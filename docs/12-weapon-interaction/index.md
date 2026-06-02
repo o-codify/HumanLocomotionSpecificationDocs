@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1556
+version: 26.602.1615
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -21,15 +21,22 @@ hand-to-hand support for two-handed handgun poses
 cheek/sight alignment quality for stocked ADS presentation
 contact quality and hold pose lifecycle
 constraint priority and recovery when interaction goals conflict
+weapon interaction archetypes and grip pose library
 weapon-facing pose states such as relaxed carry, low ready, NonADSFire/HipFire, point aim, and aim down sights
 interaction-facing fire readiness and fire visual response, without owning the fire backend
 compatibility with global full-body presentation mirroring
+explicit transform-space contract for sockets, axes, objects, mirroring, and network reconstruction
 procedural reloads as hand/object/weapon interaction
 draw and holster as visual/procedural interaction, without owning inventory selection
+object insertion quality for magazines, shells, batteries, and similar interaction objects
 magazine and ammo-object visual manipulation as interaction objects
 bolt/slide/pump/charging-handle operation as mechanism interaction
+moving part operation profiles for bolt, slide, pump, lever, hinge, latch, and button controls
 hand assignment and reachability solving for weapon interaction points
 animation execution for reaching/gripping/manipulation
+authored-vs-procedural animation ownership policy
+obstruction response from external obstruction results
+first/third-person interaction presentation from one canonical state
 multiplayer-safe interaction state reconstruction and correction smoothing
 Unreal Engine implementation mapping for interaction state and animation targets
 editor validation, authoring guidance, debugging, LOD, and acceptance testing
@@ -54,6 +61,10 @@ Defines the ownership boundary of this section: what weapon interaction owns, wh
 
 Defines shared terms used across the weapon interaction section: action step, step definition, interaction phase, step alpha, visual attachment, gameplay attachment, gameplay object, visual object, commit point, reload revision, and mechanical state revision.
 
+[Weapon Transform Space Contract](./weapon-transform-space-contract.md)
+
+Defines the transform-space contract for weapon local space, object local space, hand socket space, character component space, world space, canonical interaction space, mirrored presentation space, and network-reconstructed state.
+
 [Weapon Pose State Model](./weapon-pose-state-model.md)
 
 Defines weapon-in-hands pose states such as RelaxedCarry, LowReady, HighReady, HipFire/NonADSFire, PointAim, AimDownSights, SprintingWithWeapon, Reloading, and ManipulatingMechanism as weapon/hand/contact states. It clarifies that sprint/cover variants are driven by external systems and do not own locomotion or cover logic.
@@ -62,11 +73,23 @@ Defines weapon-in-hands pose states such as RelaxedCarry, LowReady, HighReady, H
 
 Defines how one canonical authored weapon interaction can support global full-body mirrored presentation without creating a real left-handed gameplay model, dynamic hand transfer, or duplicate mirrored interaction plans.
 
+[Weapon Interaction Phase Taxonomy](./weapon-interaction-phase-taxonomy.md)
+
+Defines shared phase names such as Approach, PreGrip, Grip, Align, Insert, Extract, Operate, Commit, Settle, Recover, Release, and Failed.
+
 [Weapon Aim and Fire Control](./weapon-aim-and-fire-control.md)
 
 Defines external aim intent consumption, HipFire/NonADSFire, point aim, ADS, interaction fire readiness, muzzle/sight alignment, hand-to-hand handgun support, stocked ADS sight/cheek quality, client prediction boundaries, and remote fire visual reconstruction from the interaction perspective. It does not own projectile simulation, damage, ammo economy, camera implementation, or the full fire backend.
 
 ### Engine-Agnostic Interaction Documents
+
+[Weapon Interaction Archetypes](./weapon-interaction-archetypes.md)
+
+Defines interaction archetypes such as one-handed pistol, two-handed handgun, stocked rifle, bullpup rifle, pump shotgun, bolt-action rifle, break-action weapon, heavy weapon, and sci-fi launcher/core weapons.
+
+[Weapon Grip Pose Library](./weapon-grip-pose-library.md)
+
+Defines common GripPoseId values and hand-shape policies for pistol grips, rifle grips, support grips, magazines, shells, rounds, bolts, pumps, levers, buttons, latches, batteries, cores, and two-handed handgun support.
 
 [Weapon Holding and Stabilization](./weapon-holding.md)
 
@@ -88,6 +111,14 @@ Defines never-break, hard, temporary-break, and soft interaction constraints, pl
 
 Defines weapon interaction points, access regions, hand policies, axes, feature flags, moving parts, ammo/reload visual objects, body slots as interaction references, and mechanical interaction state in an engine-independent way.
 
+[Weapon Object Insertion Quality](./weapon-object-insertion-quality.md)
+
+Defines pre-align, approach, axis alignment, insert travel, seat, lock commit, post-lock settle, and recovery for magazines, shells, batteries, cells, cores, and similar interaction objects.
+
+[Weapon Moving Part Operation Profiles](./weapon-moving-part-operation-profiles.md)
+
+Defines operation profiles for linear pull/push, pull-and-release, reciprocating slide, pump cycle, bolt cycle, rotating lever, break-action hinge, toggle, button, latch, and cover operations.
+
 [Weapon Solvers and Planning](./weapon-solvers-and-planning.md)
 
 Defines the hand assignment solver, reachability solver, stability solver, reload planner, action plan, dependency rules, fallback rules, and interruption recovery.
@@ -95,6 +126,10 @@ Defines the hand assignment solver, reachability solver, stability solver, reloa
 [Weapon Animation Execution](./weapon-animation-execution.md)
 
 Defines how validated action plans become visible upper-body interaction animation: reach trajectories, pre-grip, grip/contact phases, object visual attachment, weapon pose offsets, spine/shoulder assistance requests, elbow control, moving part following, animation LOD, and recovery animation.
+
+[Weapon Authored vs Procedural Animation](./weapon-authored-vs-procedural-animation.md)
+
+Defines how authored animation, procedural targets, IK, Control Rig, object alignment, moving part following, correction smoothing, and LOD share ownership without fighting each other.
 
 [Weapon Interaction Interruptions](./weapon-interaction-interruptions.md)
 
@@ -107,6 +142,14 @@ Defines draw/holster as procedural interaction: body-attached visual weapon, han
 [Procedural Weapon Reloading](./procedural-reload.md)
 
 Defines procedural reload as an action sequence built on weapon holding, interaction points, object attachment states, socket-axis directed movement, interaction commit points, and multiplayer interaction state.
+
+[Weapon Obstruction Interaction Response](./weapon-obstruction-interaction-response.md)
+
+Defines how weapon interaction responds to external obstruction results by degrading pose, blocking ADS/pose entry, compacting the weapon, delaying steps, choosing alternate paths, or recovering objects.
+
+[Weapon First and Third Person Interaction Presentation](./weapon-first-third-person-interaction-presentation.md)
+
+Defines how one canonical interaction state can drive owner first-person, owner third-person, remote third-person, cinematic, and low-LOD presentation rigs without duplicating gameplay logic.
 
 [Weapon Interaction Networking](./weapon-networking.md)
 
@@ -184,6 +227,10 @@ Defines the compact MVP implementation checklist: files to create, types/tags, p
 
 Defines tests for low ready, HipFire/NonADSFire, ADS, sprint pose interaction, interaction fire readiness, reload overlay entry/exit, fire visual response, remote fire visual reconstruction, late relevancy, shoulder switching, and weapon switch cleanup.
 
+[Weapon Interaction Archetype Test Matrix](./weapon-interaction-archetype-test-matrix.md)
+
+Defines archetype coverage tests for one-handed pistol, two-handed handgun, stocked rifle, bullpup rifle, pump shotgun, bolt-action rifle, break-action weapon, heavy weapon, and launcher/sci-fi heavy weapon.
+
 [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md)
 
 Defines implementation tests for profile validation, solver behavior, reload scenarios, object lifecycle, networking, prediction rejection, editor preview, mirroring safety, and LOD/gameplay separation.
@@ -199,39 +246,49 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 ```text
 1. Weapon Interaction Boundaries
 2. Weapon Interaction Terminology
-3. Weapon Pose State Model
-4. Weapon Interaction Mirroring
-5. Weapon Aim and Fire Control
-6. Weapon Contact Quality
-7. Weapon Hold Pose Lifecycle
-8. Weapon Interaction Constraint Priority
-9. Weapon Interaction Data Model
-10. Weapon Holding and Stabilization
-11. Weapon Solvers and Planning
-12. Weapon Animation Execution
-13. Weapon Interaction Interruptions
-14. Weapon Draw and Holster Interaction
-15. Procedural Weapon Reloading
-16. Weapon Interaction Networking
-17. Weapon Interaction Correction Smoothing
-18. Weapon Interaction LOD
-19. Weapon Interaction Failure States
-20. Weapon Gameplay Tags for Unreal Engine
-21. Weapon Interaction Profile for Unreal Engine
-22. Weapon Reload Sequence Profile for Unreal Engine
-23. Weapon Reload Planner for Unreal Engine
-24. Weapon Runtime Implementation for Unreal Engine
-25. Weapon Holding and Aiming Implementation for Unreal Engine
-26. Weapon Reload Object Lifecycle for Unreal Engine
-27. Weapon Animation and Control Rig for Unreal Engine
-28. Weapon Editor Preview and Validation for Unreal Engine
-29. Weapon Interaction Authoring Guidelines
-30. Weapon Interaction Debugging
-31. Weapon Reference Implementation Flow for Unreal Engine
-32. Weapon MVP Task Checklist for Unreal Engine
-33. Weapon Holding Aiming and Fire Tests
-34. Weapon Interaction Tests and Acceptance Criteria
-35. Weapon Interaction Implementation Roadmap
+3. Weapon Transform Space Contract
+4. Weapon Pose State Model
+5. Weapon Interaction Mirroring
+6. Weapon Interaction Phase Taxonomy
+7. Weapon Aim and Fire Control
+8. Weapon Interaction Archetypes
+9. Weapon Grip Pose Library
+10. Weapon Contact Quality
+11. Weapon Hold Pose Lifecycle
+12. Weapon Interaction Constraint Priority
+13. Weapon Interaction Data Model
+14. Weapon Holding and Stabilization
+15. Weapon Object Insertion Quality
+16. Weapon Moving Part Operation Profiles
+17. Weapon Solvers and Planning
+18. Weapon Animation Execution
+19. Weapon Authored vs Procedural Animation
+20. Weapon Interaction Interruptions
+21. Weapon Draw and Holster Interaction
+22. Procedural Weapon Reloading
+23. Weapon Obstruction Interaction Response
+24. Weapon First and Third Person Interaction Presentation
+25. Weapon Interaction Networking
+26. Weapon Interaction Correction Smoothing
+27. Weapon Interaction LOD
+28. Weapon Interaction Failure States
+29. Weapon Gameplay Tags for Unreal Engine
+30. Weapon Interaction Profile for Unreal Engine
+31. Weapon Reload Sequence Profile for Unreal Engine
+32. Weapon Reload Planner for Unreal Engine
+33. Weapon Runtime Implementation for Unreal Engine
+34. Weapon Holding and Aiming Implementation for Unreal Engine
+35. Weapon Reload Object Lifecycle for Unreal Engine
+36. Weapon Animation and Control Rig for Unreal Engine
+37. Weapon Editor Preview and Validation for Unreal Engine
+38. Weapon Interaction Authoring Guidelines
+39. Weapon Interaction Debugging
+40. Weapon Reference Implementation Flow for Unreal Engine
+41. Weapon MVP Task Checklist for Unreal Engine
+42. Weapon Holding Aiming and Fire Tests
+43. Weapon Interaction Archetype Test Matrix
+44. Weapon Interaction Tests and Acceptance Criteria
+45. Weapon Interaction Implementation Roadmap
 ```
 
 ---
@@ -242,19 +299,28 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 flowchart TD
     Boundaries[Weapon Interaction Boundaries]
     Terms[Weapon Interaction Terminology]
+    Spaces[Weapon Transform Space Contract]
     Pose[Weapon Pose State Model]
     Mirror[Weapon Interaction Mirroring]
+    Phases[Weapon Interaction Phase Taxonomy]
     AimFire[Weapon Aim and Fire Control]
+    Archetypes[Weapon Interaction Archetypes]
+    Grips[Weapon Grip Pose Library]
     ContactQ[Weapon Contact Quality]
     Lifecycle[Weapon Hold Pose Lifecycle]
     Priority[Weapon Interaction Constraint Priority]
     Data[Weapon Interaction Data Model]
     Holding[Weapon Holding and Stabilization]
+    Insertion[Weapon Object Insertion Quality]
+    MovingOps[Weapon Moving Part Operation Profiles]
     Solvers[Weapon Solvers and Planning]
     AnimExec[Weapon Animation Execution]
+    AnimPolicy[Weapon Authored vs Procedural Animation]
     Interrupts[Weapon Interaction Interruptions]
     DrawHolster[Weapon Draw and Holster Interaction]
     Reload[Procedural Weapon Reloading]
+    Obstruction[Weapon Obstruction Interaction Response]
+    Presentation[Weapon First and Third Person Interaction Presentation]
     Net[Weapon Interaction Networking]
     Smooth[Weapon Interaction Correction Smoothing]
     LOD[Weapon Interaction LOD]
@@ -273,10 +339,12 @@ flowchart TD
     Ref[Weapon Reference Implementation Flow for Unreal Engine]
     Checklist[Weapon MVP Task Checklist for Unreal Engine]
     AimTests[Weapon Holding Aiming and Fire Tests]
+    ArchetypeTests[Weapon Interaction Archetype Test Matrix]
     Tests[Weapon Interaction Tests and Acceptance Criteria]
     Roadmap[Weapon Interaction Implementation Roadmap]
 
     Boundaries --> Terms
+    Boundaries --> Spaces
     Boundaries --> Pose
     Boundaries --> Mirror
     Boundaries --> AimFire
@@ -285,6 +353,7 @@ flowchart TD
     Boundaries --> Reload
     Boundaries --> Net
 
+    Terms --> Phases
     Terms --> Pose
     Terms --> Mirror
     Terms --> AimFire
@@ -298,6 +367,19 @@ flowchart TD
     Terms --> Reload
     Terms --> Net
 
+    Spaces --> Data
+    Spaces --> Mirror
+    Spaces --> Insertion
+    Spaces --> MovingOps
+    Spaces --> UERig
+    Archetypes --> Holding
+    Archetypes --> ContactQ
+    Archetypes --> ArchetypeTests
+    Grips --> AnimExec
+    Grips --> UERig
+    Phases --> Reload
+    Phases --> DrawHolster
+    Phases --> MovingOps
     Pose --> Lifecycle
     Pose --> Mirror
     Pose --> AimFire
@@ -314,14 +396,25 @@ flowchart TD
     AimFire --> UEAim
     Data --> Holding
     Data --> Solvers
+    Data --> Insertion
+    Data --> MovingOps
     Holding --> Solvers
+    Insertion --> Reload
+    MovingOps --> Reload
+    MovingOps --> AnimExec
     Solvers --> AnimExec
     Solvers --> Reload
     Solvers --> DrawHolster
+    AnimExec --> AnimPolicy
     AnimExec --> Reload
     AnimExec --> DrawHolster
+    AnimPolicy --> UERig
     Interrupts --> Reload
     Interrupts --> DrawHolster
+    Obstruction --> Holding
+    Obstruction --> Interrupts
+    Presentation --> UERig
+    Presentation --> LOD
     Reload --> Net
     DrawHolster --> Net
     Net --> Smooth
@@ -365,6 +458,7 @@ flowchart TD
     Ref --> Checklist
     UEAim --> AimTests
     AimTests --> Tests
+    ArchetypeTests --> Tests
     Checklist --> Tests
     UEProfile --> Tests
     UEPlanner --> Tests
@@ -389,14 +483,26 @@ Boundaries:
 Terminology:
   defines shared names and prevents ambiguous state names.
 
+Transform space contract:
+  prevents socket/axis/world/canonical/mirrored/network transform ambiguity.
+
 Pose state model:
   defines weapon/hand/contact pose states and how temporary interactions enter/exit them, including external-state-driven sprint/cover variants.
 
 Mirroring:
   defines how canonical weapon interaction supports global full-body mirrored presentation without changing gameplay hand roles.
 
+Phase taxonomy:
+  defines shared procedural phase names and separates phases from commit points.
+
 Aim/fire control:
   defines interaction-facing aim and fire readiness state, not the full fire backend.
+
+Archetypes:
+  define common contact and manipulation presets for different weapon interaction forms.
+
+Grip pose library:
+  defines named hand shapes and contact expectations for grips, objects, and controls.
 
 Contact quality:
   defines procedural confidence/quality for hand, hand-to-hand, shoulder, cheek/sight, object, and moving-part contacts.
@@ -413,11 +519,20 @@ Data model:
 Holding system:
   defines current contacts, weapon stability, archetype-specific support, and procedural reachability.
 
+Object insertion quality:
+  defines alignment, insertion, seating, lock readiness, and recovery for interaction objects.
+
+Moving part operation profiles:
+  define grip, motion path, commit, return, and recovery for moving controls and mechanisms.
+
 Solvers/planner:
   decide weapon interaction hand roles, reachability, stability, and manipulation plans.
 
 Animation execution:
   turns a validated interaction plan into hand/object/weapon targets.
+
+Authored/procedural animation policy:
+  defines when authored motion wins and when procedural contact correctness wins.
 
 Interruptions:
   define commit-aware cancellation and recovery for reload, draw, holster, mechanism manipulation, and prediction correction.
@@ -427,6 +542,12 @@ Draw/holster:
 
 Reload semantics:
   define reload-specific interaction scenarios and action meaning.
+
+Obstruction response:
+  defines how interaction responds to external obstruction results without owning collision detection.
+
+First/third-person presentation:
+  maps one canonical interaction state to multiple presentation rigs without duplicating gameplay logic.
 
 Networking layer:
   replicates interaction state and phase, not IK every frame.
@@ -491,8 +612,12 @@ Roadmap:
 Weapon interaction =
   clear boundaries
   + shared terminology
+  + transform-space contract
   + weapon/hand/contact pose states
   + contact quality
+  + interaction archetypes
+  + grip pose library
+  + phase taxonomy
   + hand-to-hand handgun support
   + shoulder/cheek/sight ADS presentation contacts
   + hold pose lifecycle
@@ -501,12 +626,17 @@ Weapon interaction =
   + interaction-facing aim/fire readiness
   + weapon interaction data
   + current hold state
+  + object insertion quality
+  + moving part operation profiles
   + solver decisions
   + action plans
   + animation execution targets
+  + authored/procedural animation ownership
   + interruptions and recovery
   + draw/holster interaction
   + reload/manipulation semantics
+  + obstruction interaction response
+  + first/third-person interaction presentation
   + interaction mechanical state
   + network-safe interaction replication
   + correction smoothing
@@ -523,6 +653,7 @@ Weapon interaction =
   + editor validation
   + reference flow
   + MVP checklist
+  + archetype test matrix
   + acceptance tests
   + roadmap.
 ```
