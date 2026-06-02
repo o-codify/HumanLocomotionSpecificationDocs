@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1422
+version: 26.602.1432
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -17,6 +17,8 @@ Weapon interaction covers:
 ```text
 holding weapons
 stabilizing weapons with hands/shoulder/support contacts
+relaxed carry, low ready, high ready, hip fire, point aim, and aim down sights
+fire permission, aim state, and fire state
 procedural reloads
 magazine and ammo object manipulation
 bolt/slide/pump/charging-handle operation
@@ -51,6 +53,14 @@ The engine-agnostic documents define the source of truth. The Unreal Engine docu
 [Weapon Interaction Terminology](./weapon-interaction-terminology.md)
 
 Defines shared terms used across the weapon interaction section: action step, step definition, interaction phase, step alpha, visual attachment, gameplay attachment, gameplay object, visual object, commit point, reload revision, and mechanical state revision.
+
+[Weapon Pose State Model](./weapon-pose-state-model.md)
+
+Defines weapon-in-hands pose states such as RelaxedCarry, LowReady, HighReady, HipFire, PointAim, AimDownSights, SprintingWithWeapon, Reloading, and ManipulatingMechanism, including transition rules, fire permission, muzzle policy, stability requirements, and reload entry/exit behavior.
+
+[Weapon Aim and Fire Control](./weapon-aim-and-fire-control.md)
+
+Defines aim source, aim target, hip fire, point aim, ADS, fire permission, muzzle-vs-camera policy, recoil/sway/spread concepts, server-authoritative fire validation, client prediction, and remote fire visualization.
 
 [Weapon Holding and Stabilization](./weapon-holding.md)
 
@@ -96,7 +106,11 @@ Defines the UE reload planner implementation contract: build context, build resu
 
 [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md)
 
-Defines the near-implementation-level UE 5.7 runtime architecture: source layout, concrete enums and structs, `UWeaponInteractionComponent`, `UWeaponReloadComponent`, replicated state, RPCs, `OnRep` handlers, server executor loop, commit points, prediction, interruption, tick order, object visual attachment, and implementation checklist.
+Defines the near-implementation-level UE 5.7 runtime architecture for reload/manipulation: source layout, concrete enums and structs, `UWeaponInteractionComponent`, `UWeaponReloadComponent`, replicated state, RPCs, `OnRep` handlers, server executor loop, commit points, prediction, interruption, tick order, object visual attachment, and implementation checklist.
+
+[Weapon Holding and Aiming Implementation for Unreal Engine](./weapon-holding-aiming-ue.md)
+
+Defines UE implementation for normal weapon-in-hands behavior: `UWeaponPoseComponent`, `UWeaponAimComponent`, `UWeaponFireComponent`, replicated pose/fire state, local aim state, pose transitions, fire requests, fire replication, and AnimInstance/Control Rig integration for low ready, hip fire, ADS, and reload overlay.
 
 [Weapon Reload Object Lifecycle for Unreal Engine](./weapon-object-lifecycle-ue.md)
 
@@ -120,6 +134,10 @@ Provides one complete detachable magazine reload reference scenario: weapon prof
 
 Defines the compact MVP implementation checklist: files to create, types/tags, profile asset, sequence asset, planner, runtime replication, object lifecycle, manipulation component, AnimInstance/Control Rig, networking, editor validation, and MVP tests.
 
+[Weapon Holding Aiming and Fire Tests](./weapon-holding-aiming-tests.md)
+
+Defines tests for low ready, hip fire, ADS, sprint blocking, fire validation, reload overlay entry/exit, server rejection during reload, remote fire reconstruction, late relevancy, shoulder switching, and weapon switch cleanup.
+
 [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md)
 
 Defines implementation tests for profile validation, solver behavior, reload scenarios, object lifecycle, networking, prediction rejection, editor preview, and LOD/gameplay separation.
@@ -134,24 +152,28 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 
 ```text
 1. Weapon Interaction Terminology
-2. Weapon Interaction Data Model
-3. Weapon Holding and Stabilization
-4. Weapon Solvers and Planning
-5. Weapon Animation Execution
-6. Procedural Weapon Reloading
-7. Weapon Interaction Networking
-8. Weapon Gameplay Tags for Unreal Engine
-9. Weapon Interaction Profile for Unreal Engine
-10. Weapon Reload Sequence Profile for Unreal Engine
-11. Weapon Reload Planner for Unreal Engine
-12. Weapon Runtime Implementation for Unreal Engine
-13. Weapon Reload Object Lifecycle for Unreal Engine
-14. Weapon Animation and Control Rig for Unreal Engine
-15. Weapon Editor Preview and Validation for Unreal Engine
-16. Weapon Reference Implementation Flow for Unreal Engine
-17. Weapon MVP Task Checklist for Unreal Engine
-18. Weapon Interaction Tests and Acceptance Criteria
-19. Weapon Interaction Implementation Roadmap
+2. Weapon Pose State Model
+3. Weapon Aim and Fire Control
+4. Weapon Interaction Data Model
+5. Weapon Holding and Stabilization
+6. Weapon Solvers and Planning
+7. Weapon Animation Execution
+8. Procedural Weapon Reloading
+9. Weapon Interaction Networking
+10. Weapon Gameplay Tags for Unreal Engine
+11. Weapon Interaction Profile for Unreal Engine
+12. Weapon Reload Sequence Profile for Unreal Engine
+13. Weapon Reload Planner for Unreal Engine
+14. Weapon Runtime Implementation for Unreal Engine
+15. Weapon Holding and Aiming Implementation for Unreal Engine
+16. Weapon Reload Object Lifecycle for Unreal Engine
+17. Weapon Animation and Control Rig for Unreal Engine
+18. Weapon Editor Preview and Validation for Unreal Engine
+19. Weapon Reference Implementation Flow for Unreal Engine
+20. Weapon MVP Task Checklist for Unreal Engine
+21. Weapon Holding Aiming and Fire Tests
+22. Weapon Interaction Tests and Acceptance Criteria
+23. Weapon Interaction Implementation Roadmap
 ```
 
 ---
@@ -161,6 +183,8 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 ```mermaid
 flowchart TD
     Terms[Weapon Interaction Terminology]
+    Pose[Weapon Pose State Model]
+    AimFire[Weapon Aim and Fire Control]
     Data[Weapon Interaction Data Model]
     Holding[Weapon Holding and Stabilization]
     Solvers[Weapon Solvers and Planning]
@@ -172,14 +196,18 @@ flowchart TD
     UESeq[Weapon Reload Sequence Profile for Unreal Engine]
     UEPlanner[Weapon Reload Planner for Unreal Engine]
     UERuntime[Weapon Runtime Implementation for Unreal Engine]
+    UEAim[Weapon Holding and Aiming Implementation for Unreal Engine]
     UEObjects[Weapon Reload Object Lifecycle for Unreal Engine]
     UERig[Weapon Animation and Control Rig for Unreal Engine]
     UEPreview[Weapon Editor Preview and Validation for Unreal Engine]
     Ref[Weapon Reference Implementation Flow for Unreal Engine]
     Checklist[Weapon MVP Task Checklist for Unreal Engine]
+    AimTests[Weapon Holding Aiming and Fire Tests]
     Tests[Weapon Interaction Tests and Acceptance Criteria]
     Roadmap[Weapon Interaction Implementation Roadmap]
 
+    Terms --> Pose
+    Terms --> AimFire
     Terms --> Data
     Terms --> Holding
     Terms --> Solvers
@@ -187,6 +215,10 @@ flowchart TD
     Terms --> Reload
     Terms --> Net
 
+    Pose --> AimFire
+    Pose --> Holding
+    AimFire --> Net
+    AimFire --> UEAim
     Data --> Holding
     Data --> Solvers
     Holding --> Solvers
@@ -199,6 +231,7 @@ flowchart TD
     Tags --> UESeq
     Tags --> UEPlanner
     Tags --> UERuntime
+    Tags --> UEAim
     Data --> UEProfile
     UEProfile --> UESeq
     UEProfile --> UEPlanner
@@ -207,8 +240,11 @@ flowchart TD
     Solvers --> UEPlanner
     Reload --> UEPlanner
     Net --> UERuntime
+    Net --> UEAim
     UEPlanner --> UERuntime
     UEObjects --> UERuntime
+    Pose --> UEAim
+    UEAim --> UERig
     AnimExec --> UERig
     UERuntime --> UERig
     UEProfile --> UEPreview
@@ -222,6 +258,8 @@ flowchart TD
     UERig --> Ref
 
     Ref --> Checklist
+    UEAim --> AimTests
+    AimTests --> Tests
     Checklist --> Tests
     UEProfile --> Tests
     UEPlanner --> Tests
@@ -242,6 +280,12 @@ A correct implementation must follow this ownership model:
 Terminology:
   defines shared names and prevents ambiguous state names.
 
+Pose state model:
+  defines how the weapon is carried, aimed, stabilized, allowed to fire, and restored after temporary actions.
+
+Aim/fire control:
+  defines aim source/target, muzzle/camera policy, fire permission, server fire validation, prediction, and remote fire visualization.
+
 Data model:
   defines what exists and how it can be used.
 
@@ -261,7 +305,7 @@ Networking layer:
   replicates gameplay state and phase, not IK every frame.
 
 Gameplay tags:
-  provide stable names for sequences, steps, commits, rejection reasons, recovery policies, contacts, and grip poses.
+  provide stable names for sequences, steps, commits, rejection reasons, recovery policies, contacts, grip poses, pose/fire policies, and debug states.
 
 UE profile and sequence assets:
   define authored data.
@@ -270,7 +314,10 @@ UE planner:
   converts request/context/profile/sequence data into runtime action plans.
 
 UE runtime implementation:
-  owns concrete components, replicated structs, RPCs, OnRep handlers, executor loop, prediction, and tick/update order.
+  owns reload/manipulation components, replicated structs, RPCs, OnRep handlers, executor loop, prediction, and tick/update order.
+
+UE holding/aiming implementation:
+  owns pose state, aim state, fire requests, fire replication, and pose/aim animation bridge.
 
 UE object lifecycle:
   separates gameplay object state from visual object state.
@@ -301,6 +348,8 @@ Roadmap:
 ```text
 Weapon interaction =
   shared terminology
+  + weapon pose states
+  + aim/fire control
   + weapon data
   + current hold state
   + solver decisions
@@ -312,6 +361,7 @@ Weapon interaction =
   + gameplay tags
   + UE authored assets
   + UE planner/runtime implementation
+  + UE holding/aiming implementation
   + UE object lifecycle
   + UE animation implementation
   + editor validation
