@@ -2,7 +2,7 @@
 id: weapon-holding-aiming-and-fire-tests
 title: Weapon Holding Aiming and Fire Tests
 status: draft
-version: 26.602.1431
+version: 26.602.1455
 tags: [ weapon, tests, holding, aiming, fire, ads, hip-fire ]
 ---
 
@@ -10,7 +10,7 @@ tags: [ weapon, tests, holding, aiming, fire, ads, hip-fire ]
 
 ## Purpose
 
-This document defines tests and acceptance criteria for normal weapon-in-hands behavior:
+This document defines tests and acceptance criteria for weapon-in-hands interaction behavior:
 
 ```text
 holding
@@ -19,12 +19,15 @@ hip fire
 point aim
 aim down sights
 pose transitions
-fire validation
+interaction fire readiness
+fire visual response
 reload overlay
-remote fire reconstruction
+remote fire visual reconstruction
 ```
 
-Reload-specific tests are defined in [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md).
+Reload-specific tests are defined in [Weapon Interaction Tests and Acceptance Criteria](./weapon-interaction-tests.md). Scope boundaries are defined in [Weapon Interaction Boundaries](./weapon-interaction-boundaries.md).
+
+This document does not test projectile simulation, damage, ammo economy, camera implementation, locomotion speed, or the full external fire backend.
 
 ---
 
@@ -34,10 +37,10 @@ All tests must verify:
 
 ```text
 pose state is explicit
-fire permission uses pose + mechanical + reload state
-client visuals do not authoritatively change gameplay
-remote clients reconstruct state from replicated pose/fire data
-reload overlays current pose and exits to a valid pose
+fire readiness uses weapon interaction state
+client visuals do not authoritatively change external gameplay state
+remote clients reconstruct interaction visuals from replicated pose/fire-visual data
+reload overlays current pose and exits to a valid weapon pose
 ```
 
 ---
@@ -49,53 +52,53 @@ Setup:
 ```text
 weapon equipped
 pose = LowReady
-player presses fire or raise-to-fire input
-mechanical state allows fire
+external input requests raise-to-fire or hip-fire pose
+external backend may request fire readiness
 ```
 
 Expected:
 
 ```text
-pose transitions to HipFire or fires after allowed raise transition
+pose transitions to HipFire or starts allowed raise transition
 weapon remains stabilized
-muzzle moves toward aim direction
-server validates fire permission
+muzzle moves toward external aim direction
+interaction fire readiness reports whether pose is ready
 ```
 
 Fail if:
 
 ```text
-shot fires while pose policy blocks fire
-weapon fires without mechanical/chamber validation
+weapon visually fires while interaction pose policy blocks fire readiness
 hand IK snaps instantly to hip fire pose
+pose transition bypasses interaction state
 ```
 
 ---
 
-## Test 2: Hip Fire
+## Test 2: Hip Fire Interaction Pose
 
 Setup:
 
 ```text
 pose = HipFire
-chambered round available
 support grip active for rifle
+external aim intent is valid
 ```
 
 Expected:
 
 ```text
-fire allowed
-muzzle direction plausibly follows camera/controller aim
-spread/recoil policy is hip-fire policy
-server owns ammo consumption and hit/projectile authority
+interaction fire readiness can become ready
+muzzle direction plausibly follows external aim intent
+fire visual response can be played if external fire backend confirms/predicts fire
+support hand remains stable unless released by another interaction
 ```
 
 Fail if:
 
 ```text
-client consumes ammo authoritatively
-muzzle points far away from gameplay fire direction
+weapon interaction consumes ammo or decides damage
+muzzle points far away from external aim direction
 support hand drifts away without action plan
 ```
 
@@ -107,8 +110,8 @@ Setup:
 
 ```text
 pose = HipFire
-player holds ADS input
-movement state allows ADS
+external input requests ADS pose
+external locomotion/body systems do not block ADS pose request
 ```
 
 Expected:
@@ -117,8 +120,7 @@ Expected:
 DesiredPose = AimDownSights
 PoseAlpha blends over configured duration
 sight alignment error decreases
-movement freedom reduces
-fire policy changes to ADS policy when transition threshold allows
+interaction pose becomes ADS-ready when alignment/contact rules pass
 ```
 
 Fail if:
@@ -126,70 +128,70 @@ Fail if:
 ```text
 ADS snaps instantly without transition
 sight alignment does not converge
-server and client disagree on pose state
+server and client disagree on weapon pose state
+weapon interaction defines locomotion speed or body yaw directly
 ```
 
 ---
 
-## Test 4: ADS Fire
+## Test 4: ADS Fire Visual Response
 
 Setup:
 
 ```text
 pose = AimDownSights
-sight alignment within tolerance
-mechanical state allows fire
+sight alignment within interaction tolerance
+external fire backend confirms or predicts a fire visual event
 ```
 
 Expected:
 
 ```text
-fire allowed
-ADS spread/recoil policy used
-local muzzle flash/recoil predicted
-server validates and replicates fire state
-remote clients reconstruct fire visual
+interaction fire readiness is ready before fire visual event
+ADS fire visual pose impulse is used
+local fire visual response plays
+remote clients reconstruct fire visual response
 ```
 
 Fail if:
 
 ```text
-ADS fire uses hip-fire policy accidentally
-remote clients need per-frame IK to see fire event
-server allows fire while weapon is mechanically unable
+ADS fire visual uses hip-fire interaction pose by mistake
+remote clients need per-frame IK to see fire visual event
+weapon interaction decides projectile/hit/damage outcome
 ```
 
 ---
 
-## Test 5: Sprint Blocks ADS and Fire
+## Test 5: Sprint Weapon Pose Blocks ADS Interaction Pose
 
 Setup:
 
 ```text
 pose = AimDownSights or HipFire
-character starts sprinting
-weapon policy does not allow sprint fire
+external locomotion state indicates sprinting
+weapon interaction policy does not allow ADS while sprint weapon pose is active
 ```
 
 Expected:
 
 ```text
-pose transitions to SprintingWithWeapon or LowReady
-ADS exits
-fire blocked
-reload interrupted or blocked according to policy
+weapon pose transitions to SprintingWithWeapon or another valid weapon pose
+ADS interaction pose exits
+interaction fire readiness reports blocked or not-ready
+reload/manipulation may be interrupted or blocked according to interaction policy
 ```
 
 Fail if:
 
 ```text
-character remains in ADS while sprinting without policy support
-server accepts fire during blocked sprint state
+weapon remains in ADS interaction pose while external state blocks it
+weapon interaction computes locomotion speed itself
 ```
 
 ---
 
-## Test 6: Reload From ADS Returns To Valid Pose
+## Test 6: Reload From ADS Returns To Valid Weapon Pose
 
 Setup:
 
@@ -197,7 +199,7 @@ Setup:
 pose = AimDownSights
 reload starts
 reload completes
-movement state still allows ADS
+ADS weapon pose is still allowed by external systems
 ```
 
 Expected:
@@ -206,7 +208,7 @@ Expected:
 PreviousPose = AimDownSights
 pose becomes Reloading overlay
 reload plan executes
-pose returns to AimDownSights or configured exit pose
+pose returns to AimDownSights or configured exit weapon pose
 ```
 
 Fail if:
@@ -226,99 +228,99 @@ Setup:
 ```text
 pose = AimDownSights
 reload starts
-character begins sprinting or enters state that blocks ADS
+external state later blocks ADS weapon pose
 reload completes or interrupts
 ```
 
 Expected:
 
 ```text
-system does not return to invalid ADS
-fallback order chooses HipFire, LowReady, or SprintingWithWeapon depending on context
+system does not return to invalid ADS weapon pose
+fallback order chooses HipFire, LowReady, SprintingWithWeapon, or another allowed weapon pose
 pose transition is replicated
 ```
 
 Fail if:
 
 ```text
-system restores ADS even though movement state blocks ADS
-client and server diverge on final pose
+system restores ADS even though external systems block ADS
+client and server diverge on final weapon pose
+weapon interaction owns the external blocking system
 ```
 
 ---
 
-## Test 8: Server Rejects Fire During Reload Before Commit
+## Test 8: Fire Readiness During Reload Before Commit
 
 Setup:
 
 ```text
 reload active
-MagazineLocked not committed
-weapon policy = CannotFireDuringReload or blocked before commit
-client presses fire
+required interaction commit is not reached
+external fire backend asks for interaction fire readiness
 ```
 
 Expected:
 
 ```text
-local fire visual may be suppressed or predicted then rejected
-server rejects fire
-no ammo consumed by client authority
-reload continues or recovers according to policy
+interaction fire readiness reports blocked/not-ready
+local fire visual may be suppressed
+external backend remains responsible for final fire acceptance
+reload continues or recovers according to interaction policy
 ```
 
 Fail if:
 
 ```text
-client fires authoritatively
-server mechanical state ignored
-reload and fire states conflict permanently
+weapon interaction authoritatively fires a shot
+weapon interaction consumes ammo or applies damage
+reload and fire visual states conflict permanently
 ```
 
 ---
 
-## Test 9: Fire After Reload Commit Policy
+## Test 9: Fire Readiness After Reload Commit Policy
 
 Setup:
 
 ```text
 reload active
-MagazineLocked committed
-weapon policy = CanFireAfterCommit
+required interaction commit reached
+weapon interaction policy = CanRequestFireAfterInteractionCommit
 pose stability is valid
-client presses fire
+external fire backend asks for interaction fire readiness
 ```
 
 Expected:
 
 ```text
-server allows fire if mechanical state and stability allow
-reload either continues visually, cancels, or transitions according to policy
-fire state replicates
+interaction fire readiness can report ready
+reload either continues visually, cancels visually, or transitions according to interaction policy
+fire visual state can replicate if external backend confirms fire event
 ```
 
 Fail if:
 
 ```text
-fire is always blocked despite policy
-fire always allowed regardless of stability/mechanical state
+interaction readiness is always blocked despite policy
+interaction readiness is always allowed regardless of stability/interaction state
 ```
 
 ---
 
-## Test 10: Remote Fire Reconstruction
+## Test 10: Remote Fire Visual Reconstruction
 
 Setup:
 
 ```text
-remote client receives replicated FireState
-remote client did not see StartFire input
+remote client receives replicated FireVisualState
+remote client did not see local fire input
 ```
 
 Expected:
 
 ```text
-remote plays muzzle flash/sound/recoil animation from FireSequenceId and LastFireServerTime
+remote plays interaction fire visual response from FireSequenceId and LastFireVisualServerTime
 remote does not need per-frame hand IK replication
 remote uses replicated pose state for broad visual context
 ```
@@ -327,7 +329,7 @@ Fail if:
 
 ```text
 remote fire visual depends on owning client's local-only variables
-remote misses fire event because no per-frame IK was replicated
+remote misses fire visual event because no per-frame IK was replicated
 ```
 
 ---
@@ -345,14 +347,14 @@ Expected:
 ```text
 remote receives PoseState
 computes pose alpha from server time
-shows correct broad pose
+shows correct broad weapon pose
 ```
 
 Fail if:
 
 ```text
 remote defaults to LowReady until next input event
-remote cannot reconstruct current pose without history
+remote cannot reconstruct current weapon pose without history
 ```
 
 ---
@@ -372,7 +374,7 @@ Expected:
 ShoulderSide replicates
 hand/contact roles update through holding solver
 weapon pose transitions without blind negative-scale mirroring
-aim remains plausible
+aim interaction remains plausible
 ```
 
 Fail if:
@@ -392,16 +394,16 @@ Setup:
 ```text
 weapon active
 pose = ADS or Reloading
-player switches weapon
+external equipment system switches weapon
 ```
 
 Expected:
 
 ```text
 old weapon pose/aim/reload visual state clears
-new weapon initializes valid pose
+new weapon initializes valid interaction pose
 stale IK targets are disabled
-server owns final equipped weapon and pose state
+server owns final equipped weapon reference outside this interaction layer
 ```
 
 Fail if:
@@ -409,25 +411,25 @@ Fail if:
 ```text
 old weapon hand targets remain active
 old reload visual persists
-client keeps firing old weapon locally
+weapon interaction implements full equipment system here
 ```
 
 ---
 
 ## MVP Acceptance Set
 
-MVP weapon-in-hands acceptance requires:
+MVP weapon-in-hands interaction acceptance requires:
 
 ```text
 LowReady to HipFire
-HipFire fire
+HipFire interaction fire readiness
 HipFire to ADS
-ADS fire
-Sprint blocks ADS/fire
+ADS fire visual response
+Sprint weapon pose blocks ADS interaction pose
 Reload from ADS returns or falls back correctly
-Remote fire reconstruction
+Remote fire visual reconstruction
 Pose replication late relevancy
-Weapon switch clears state
+Weapon switch clears interaction state
 ```
 
 ---
@@ -435,11 +437,11 @@ Weapon switch clears state
 ## Final Formula
 
 ```text
-Weapon-in-hands acceptance =
-  explicit pose state
-  + valid aim/fire permission
-  + server authority
+Weapon-in-hands interaction acceptance =
+  explicit weapon pose state
+  + valid interaction fire readiness
+  + external backend boundaries
   + reload overlay integration
   + remote visual reconstruction
-  + clean state transitions.
+  + clean interaction state transitions.
 ```
