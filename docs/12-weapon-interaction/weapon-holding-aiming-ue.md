@@ -2,7 +2,7 @@
 id: weapon-holding-and-aiming-implementation-for-unreal-engine
 title: Weapon Holding and Aiming Implementation for Unreal Engine
 status: draft
-version: 26.602.1431
+version: 26.602.1454
 tags: [ weapon, unreal-engine, ue5.7, holding, aiming, fire, replication ]
 ---
 
@@ -10,7 +10,7 @@ tags: [ weapon, unreal-engine, ue5.7, holding, aiming, fire, replication ]
 
 ## Purpose
 
-This document defines the Unreal Engine implementation contract for normal weapon-in-hands behavior:
+This document defines the Unreal Engine implementation contract for normal weapon-in-hands interaction behavior:
 
 ```text
 holding
@@ -19,19 +19,22 @@ high ready
 hip fire
 point aim
 aim down sights
-pose transitions
-fire state
-pose/aim/fire replication
+weapon pose transitions
+interaction-facing fire readiness
+fire visual state
+pose/aim/fire-visual replication
 AnimInstance and Control Rig integration
 ```
 
-Reload-specific runtime implementation is defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md). Pose states are defined in [Weapon Pose State Model](./weapon-pose-state-model.md). Aim/fire concepts are defined in [Weapon Aim and Fire Control](./weapon-aim-and-fire-control.md).
+Reload-specific runtime implementation is defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md). Pose states are defined in [Weapon Pose State Model](./weapon-pose-state-model.md). Aim/fire interaction boundaries are defined in [Weapon Aim and Fire Control](./weapon-aim-and-fire-control.md). Scope boundaries are defined in [Weapon Interaction Boundaries](./weapon-interaction-boundaries.md).
+
+This document does not implement the full fire backend, projectile simulation, damage, ammo economy, camera system, locomotion speed, or body orientation solver.
 
 ---
 
 ## Runtime Components
 
-Recommended character-owned components:
+Recommended character-owned interaction components:
 
 ```text
 UWeaponPoseComponent
@@ -39,12 +42,22 @@ UWeaponAimComponent
 UProceduralWeaponManipulationComponent
 ```
 
-Recommended weapon-owned components:
+Recommended weapon-owned interaction components:
 
 ```text
 UWeaponInteractionComponent
 UWeaponReloadComponent
-UWeaponFireComponent optional
+UWeaponFireVisualComponent optional
+```
+
+External systems may provide:
+
+```text
+fire backend
+inventory/ammo backend
+camera/controller aim source
+locomotion/body orientation state
+obstruction query provider
 ```
 
 Animation bridge:
@@ -78,6 +91,8 @@ enum class EWeaponPoseState : uint8
     Blocked
 };
 ```
+
+These are weapon/hand/contact pose states. They do not define locomotion speed or body orientation.
 
 ---
 
@@ -116,16 +131,16 @@ Replicate pose state, not per-frame IK.
 
 ---
 
-## Aim State
+## Interaction Aim State
 
 ```cpp
 USTRUCT(BlueprintType)
-struct FWeaponAimState
+struct FWeaponAimInteractionState
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly)
-    bool bIsAiming = false;
+    bool bHasAimIntent = false;
 
     UPROPERTY(BlueprintReadOnly)
     EWeaponPoseState AimPose = EWeaponPoseState::HipFire;
@@ -144,39 +159,39 @@ struct FWeaponAimState
 };
 ```
 
-For owning client, aim direction may update from camera/controller every frame locally. Replication should remain compact and policy-driven.
+Aim direction is usually provided by external camera/controller/AI intent systems. This component consumes aim intent to build weapon interaction pose targets.
 
 ---
 
-## Fire State
+## Fire Visual State
 
 ```cpp
 USTRUCT(BlueprintType)
-struct FReplicatedWeaponFireState
+struct FReplicatedWeaponFireVisualState
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly)
-    bool bIsFiring = false;
+    bool bIsFiringVisual = false;
 
     UPROPERTY(BlueprintReadOnly)
     uint16 FireSequenceId = 0;
 
     UPROPERTY(BlueprintReadOnly)
-    float LastFireServerTime = 0.f;
+    float LastFireVisualServerTime = 0.f;
 
     UPROPERTY(BlueprintReadOnly)
     FGameplayTag FireMode;
 
     UPROPERTY(BlueprintReadOnly)
-    FVector_NetQuantizeNormal LastFireDirection;
+    FVector_NetQuantizeNormal LastFireVisualDirection;
 
     UPROPERTY(BlueprintReadOnly)
-    uint8 FireRevision = 0;
+    uint8 FireVisualRevision = 0;
 };
 ```
 
-Fire state is for event reconstruction. Damage/projectiles remain server-authoritative.
+This state reconstructs fire visuals for interaction/animation. It does not own damage, projectile authority, ammo consumption, or backend fire acceptance.
 
 ---
 
@@ -210,7 +225,7 @@ protected:
 };
 ```
 
-`RequestPose` may start local visual prediction for owner. Server state is authoritative.
+`RequestPose` may start local visual prediction for owner. Server replicated pose state remains authoritative for remote reconstruction.
 
 ---
 
@@ -224,9 +239,9 @@ class UWeaponAimComponent : public UActorComponent
 
 public:
     UPROPERTY(BlueprintReadOnly)
-    FWeaponAimState LocalAimState;
+    FWeaponAimInteractionState LocalAimInteractionState;
 
-    void UpdateAimFromController(float DeltaTime);
+    void UpdateFromExternalAimIntent(const FWeaponExternalAimIntent& AimIntent, float DeltaTime);
 
     bool ComputeSightAlignmentError(float& OutDegrees) const;
 
@@ -236,57 +251,50 @@ public:
 };
 ```
 
-This component can be local-only for high-frequency aim updates. Server fire validation receives aim data through fire requests.
+This component is interaction-facing. It does not own the camera/controller/AI system that creates aim intent.
 
 ---
 
-## UWeaponFireComponent
+## UWeaponFireVisualComponent
 
 ```cpp
 UCLASS(ClassGroup=(Weapon), meta=(BlueprintSpawnableComponent))
-class UWeaponFireComponent : public UActorComponent
+class UWeaponFireVisualComponent : public UActorComponent
 {
     GENERATED_BODY()
 
 public:
-    UPROPERTY(ReplicatedUsing=OnRep_FireState, BlueprintReadOnly)
-    FReplicatedWeaponFireState FireState;
+    UPROPERTY(ReplicatedUsing=OnRep_FireVisualState, BlueprintReadOnly)
+    FReplicatedWeaponFireVisualState FireVisualState;
 
     UFUNCTION(BlueprintCallable)
-    void StartFire();
+    void PredictLocalFireVisual(const FWeaponFireVisualEvent& Event);
 
     UFUNCTION(BlueprintCallable)
-    void StopFire();
-
-    UFUNCTION(Server, Reliable)
-    void ServerStartFire(FWeaponFireRequest Request);
-
-    UFUNCTION(Server, Reliable)
-    void ServerStopFire(uint16 ClientFireSequenceId);
+    void ApplyConfirmedFireVisual(const FWeaponFireVisualEvent& Event);
 
 protected:
     UFUNCTION()
-    void OnRep_FireState();
+    void OnRep_FireVisualState();
 
-    bool CanFire(const FWeaponFireRequest& Request, FGameplayTagContainer& OutRejectedReasons) const;
-    void ApplyServerFire(const FWeaponFireRequest& Request);
+    void BuildFirePoseImpulse(const FWeaponFireVisualEvent& Event);
 };
 ```
 
-Fire component checks pose, reload, mechanical state, ammo, and cooldown.
+External fire backend confirms or rejects fire. This component only visualizes confirmed/predicted fire interaction events.
 
 ---
 
-## Fire Request
+## External Fire Readiness Request
 
 ```cpp
 USTRUCT(BlueprintType)
-struct FWeaponFireRequest
+struct FWeaponInteractionFireReadinessRequest
 {
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly)
-    uint16 ClientFireSequenceId = 0;
+    EWeaponPoseState PoseAtRequest = EWeaponPoseState::HipFire;
 
     UPROPERTY(BlueprintReadOnly)
     FVector_NetQuantize AimOrigin;
@@ -295,15 +303,17 @@ struct FWeaponFireRequest
     FVector_NetQuantizeNormal AimDirection;
 
     UPROPERTY(BlueprintReadOnly)
-    EWeaponPoseState PoseAtFire = EWeaponPoseState::HipFire;
+    EWeaponInteractionPhase InteractionPhase = EWeaponInteractionPhase::None;
 
     UPROPERTY(BlueprintReadOnly)
-    FGameplayTag FireMode;
+    bool bHandsOccupied = false;
 
     UPROPERTY(BlueprintReadOnly)
-    float ClientFireTime = 0.f;
+    bool bStableEnoughForFire = false;
 };
 ```
+
+This request may be sent to an external fire backend. The backend decides final fire acceptance.
 
 ---
 
@@ -319,30 +329,26 @@ sequenceDiagram
     C->>Pose: RequestPose(AimDownSights)
     Pose->>Pose: Start local visual transition
     Pose->>S: ServerRequestPose(AimDownSights)
-    S->>S: Validate pose transition
+    S->>S: Validate interaction pose transition
     S-->>Pose: Replicate PoseState
-    Pose->>Anim: Push pose/aim anim state
+    Pose->>Anim: Push pose/aim interaction state
 ```
 
 ---
 
-## Fire Flow
+## Fire Visual Flow
 
 ```mermaid
 sequenceDiagram
-    participant C as Owning Client
-    participant Fire as UWeaponFireComponent
-    participant S as Server
+    participant Backend as External Fire Backend
+    participant Vis as UWeaponFireVisualComponent
+    participant Anim as UWeaponAnimInstance
     participant RC as Remote Clients
 
-    C->>Fire: StartFire
-    Fire->>C: Predict muzzle flash/recoil
-    Fire->>S: ServerStartFire(FireRequest)
-    S->>S: Validate pose/mechanical/reload/ammo/cooldown
-    S->>S: Apply authoritative fire
-    S-->>C: Replicate FireState
-    S-->>RC: Replicate FireState
-    RC->>RC: Reconstruct fire visual
+    Backend->>Vis: Confirm/Predict FireVisualEvent
+    Vis->>Anim: Build fire pose impulse
+    Vis-->>RC: Replicate FireVisualState if needed
+    RC->>RC: Reconstruct fire visual interaction
 ```
 
 ---
@@ -367,7 +373,7 @@ struct FWeaponPoseAimAnimState
     float PoseAlpha = 0.f;
 
     UPROPERTY(BlueprintReadWrite)
-    bool bIsAiming = false;
+    bool bHasAimIntent = false;
 
     UPROPERTY(BlueprintReadWrite)
     FVector AimDirectionWorld = FVector::ForwardVector;
@@ -376,7 +382,7 @@ struct FWeaponPoseAimAnimState
     float AimAlpha = 0.f;
 
     UPROPERTY(BlueprintReadWrite)
-    bool bIsFiring = false;
+    bool bIsFiringVisual = false;
 
     UPROPERTY(BlueprintReadWrite)
     float FireVisualAlpha = 0.f;
@@ -399,31 +405,31 @@ Pose/aim state is continuous. Reload/manipulation state is temporary overlay/dis
 Recommended order:
 
 ```text
-1. base locomotion
+1. base locomotion pose from external locomotion system
 2. weapon pose state layer: relaxed/low/high/hip/ADS
-3. aim offset / aim pose correction
+3. interaction-facing aim pose correction
 4. reload/manipulation overlay if active
 5. Control Rig hand stabilization and manipulation
-6. recoil additive
+6. fire visual pose impulse if active
 7. final hand/contact correction if needed
 ```
 
-ADS and hip fire are not reload states. Reload overlays them and then exits back to a valid pose.
+ADS and hip fire are not reload states. Reload overlays them and then exits back to a valid weapon pose.
 
 ---
 
 ## Replication Rules
 
-Replicate:
+Replicate for interaction reconstruction:
 
 ```text
 pose state
 pose transition timestamps
 shoulder side
-fire event/state
-fire sequence id
-last fire server time
-compressed fire direction if needed
+fire visual event/state
+fire visual sequence id
+last fire visual server time
+compressed fire visual direction if needed
 ```
 
 Do not replicate:
@@ -433,13 +439,15 @@ hand IK every frame
 aim offset every frame for all clients
 Control Rig variables every frame
 weapon sway/recoil transforms every frame
+projectile simulation state owned by another system
+camera state owned by another system
 ```
 
 ---
 
 ## Debug Requirements
 
-Debug should show:
+Debug should show interaction-facing state:
 
 ```text
 CurrentPose
@@ -450,9 +458,9 @@ ShoulderSide
 AimDirection
 MuzzleDirection
 SightAlignmentError
-bIsFiring
-FireSequenceId
-CanFire result
+bIsFiringVisual
+FireVisualSequenceId
+InteractionFireReadiness
 CanEnterPose result
 reload state interaction
 ```
@@ -469,11 +477,10 @@ HipFire
 AimDownSights
 Reloading overlay
 right/left shoulder
-single fire request path
-server fire validation
-local fire visuals
-remote fire visuals
-basic aim offset / weapon pose blend
+external fire readiness request
+local fire visual response
+remote fire visual response
+basic interaction-facing aim pose blend
 ```
 
 ---
@@ -481,10 +488,11 @@ basic aim offset / weapon pose blend
 ## Final Formula
 
 ```text
-UE holding/aiming implementation =
-  replicated pose state
-  + local aim state
-  + server-authoritative fire state
+UE holding/aiming interaction implementation =
+  replicated weapon pose state
+  + external aim intent consumption
+  + interaction fire readiness request
+  + fire visual state
   + AnimInstance pose/aim bridge
   + Control Rig stabilization
   + reload overlay integration.
