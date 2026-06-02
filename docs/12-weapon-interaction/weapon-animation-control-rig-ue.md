@@ -2,7 +2,7 @@
 id: weapon-animation-and-control-rig-for-unreal-engine
 title: Weapon Animation and Control Rig for Unreal Engine
 status: draft
-version: 26.602.1320
+version: 26.602.1418
 tags: [ weapon, unreal-engine, ue5.7, animation, control-rig, ik, anim-instance ]
 ---
 
@@ -10,75 +10,145 @@ tags: [ weapon, unreal-engine, ue5.7, animation, control-rig, ik, anim-instance 
 
 ## Purpose
 
-This document maps [Weapon Animation Execution](./weapon-animation-execution.md) to an Unreal Engine 5.7 implementation.
+This document maps [Weapon Animation Execution](./weapon-animation-execution.md) to an Unreal Engine 5.7 animation implementation.
 
-It defines how runtime weapon interaction targets are passed from C++ components into AnimInstance and Control Rig, how hands follow targets, how weapon pose offsets are applied, how object attachment is visualized, and how remote clients reconstruct procedural reloads.
-
----
-
-## Implementation Ownership
-
-```text
-Gameplay components:
-  decide state, plan actions, replicate state.
-
-AnimInstance:
-  stores animation-facing runtime data and exposes it to AnimGraph / Control Rig.
-
-Control Rig / IK Rig:
-  solves arms, hands, elbows, spine, and optional fingers from provided targets.
-
-Weapon mesh component:
-  applies moving part offsets for bolt, slide, pump, lever, and similar parts.
-```
-
-The AnimBP must not decide reload logic.
-
----
-
-## UE Animation Pipeline
-
-```mermaid
-flowchart TD
-    Reload[UWeaponReloadComponent]
-    Manip[UProceduralWeaponManipulationComponent]
-    Anim[UWeaponAnimInstance]
-    Graph[AnimGraph]
-    Rig[Control Rig]
-    Weapon[Weapon SkeletalMeshComponent]
-    Pose[Final Pose]
-
-    Reload --> Manip
-    Manip --> Anim
-    Anim --> Graph
-    Graph --> Rig
-    Rig --> Pose
-    Reload --> Weapon
-    Weapon --> Pose
-```
-
----
-
-## Recommended Runtime Components
-
-Character-owned:
+It defines the implementation contract between:
 
 ```text
 UProceduralWeaponManipulationComponent
-```
-
-Weapon-owned:
-
-```text
-UWeaponInteractionComponent
-UWeaponReloadComponent
-```
-
-Animation-owned:
-
-```text
 UWeaponAnimInstance
-Control Rig asset for upper body / hands
+AnimGraph
+Control Rig
+weapon skeletal mesh moving parts
+visual reload objects
+```
+
+Runtime planning, replication, and server authority are defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md). Reload object lifecycle is defined in [Weapon Reload Object Lifecycle for Unreal Engine](./weapon-object-lifecycle-ue.md).
+
+---
+
+## UE 5.7 API Basis
+
+This document uses Unreal Engine 5.7 animation patterns:
+
+```text
+UAnimInstance
+AnimGraph
+Control Rig node in Animation Blueprint
+Control Rig variables exposed to AnimBP
+Two Bone IK / FABRIK / Full Body IK style solving
+skeletal mesh sockets
+bone-space, component-space, and world-space transforms
+animation LOD decisions
+```
+
+Project-specific classes and structs such as `UWeaponAnimInstance`, `FWeaponHandIKTarget`, and `UProceduralWeaponManipulationComponent` are implementation classes defined by this weapon interaction system.
+
+---
+
+## Ownership Boundary
+
+Animation implementation owns:
+
+```text
+animation-facing target storage
+hand target smoothing
+Control Rig input transfer
+IK solve order
+spine/clavicle/shoulder assist
+finger/grip pose blending
+moving part visual following
+animation LOD behavior
+visual debug drawing
+```
+
+Animation implementation does not own:
+
+```text
+reload validation
+hand assignment decisions
+server authority
+gameplay commit points
+inventory mutation
+mechanical state authority
+object lifecycle authority
+```
+
+The AnimBP and Control Rig visualize already resolved state. They must not decide gameplay validity.
+
+---
+
+## Animation Data Flow
+
+```mermaid
+flowchart TD
+    Runtime[UWeaponReloadComponent]
+    Manip[UProceduralWeaponManipulationComponent]
+    Objects[Reload Object Lifecycle]
+    Anim[UWeaponAnimInstance]
+    Graph[AnimGraph]
+    CR[Control Rig]
+    Mesh[Character Skeletal Mesh]
+    Weapon[Weapon Skeletal Mesh]
+
+    Runtime --> Manip
+    Runtime --> Objects
+    Objects --> Manip
+    Manip --> Anim
+    Anim --> Graph
+    Graph --> CR
+    CR --> Mesh
+    Runtime --> Weapon
+```
+
+---
+
+## Update Order Contract
+
+Recommended frame order on clients:
+
+```text
+1. Replicated reload/mechanical state updates through OnRep or local prediction.
+2. UProceduralWeaponManipulationComponent computes current visual state and StepAlpha.
+3. Manipulation component builds left/right hand targets, elbow poles, grip states, and weapon pose offset.
+4. Manipulation component pushes animation-facing data into UWeaponAnimInstance.
+5. AnimInstance update reads stored weapon interaction state.
+6. AnimGraph evaluates locomotion/weapon base pose.
+7. Control Rig node solves weapon interaction hands/spine/shoulders.
+8. Optional cosmetic additive layers run.
+9. Final pose is output.
+```
+
+The manipulation component must update before animation evaluation. If the project uses custom tick groups, add tick prerequisites accordingly.
+
+---
+
+## Coordinate Space Contract
+
+Use explicit spaces.
+
+Runtime target generation may work in world space because interaction points and hand sockets are world-resolved at runtime.
+
+Control Rig should receive either:
+
+```text
+world-space targets and convert them to component/control space inside the rig
+```
+
+or:
+
+```text
+component-space targets already converted by the AnimInstance/manipulation component
+```
+
+Do not mix spaces silently.
+
+Recommended MVP:
+
+```text
+FWeaponHandIKTarget stores world-space target transform.
+AnimInstance passes world-space target to Control Rig.
+Control Rig converts to rig/component space once at graph start.
 ```
 
 ---
@@ -116,6 +186,12 @@ struct FWeaponHandIKTarget
 
     UPROPERTY(BlueprintReadWrite)
     FGameplayTag ContactState;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bIsStabilizingContact = false;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bIsManipulationHand = false;
 };
 ```
 
@@ -153,6 +229,12 @@ struct FWeaponMovingPartAnimState
     FName MovingPartName;
 
     UPROPERTY(BlueprintReadWrite)
+    FName BoneName;
+
+    UPROPERTY(BlueprintReadWrite)
+    FName FollowSocketName;
+
+    UPROPERTY(BlueprintReadWrite)
     float Alpha = 0.f;
 
     UPROPERTY(BlueprintReadWrite)
@@ -160,6 +242,43 @@ struct FWeaponMovingPartAnimState
 
     UPROPERTY(BlueprintReadWrite)
     float Distance = 0.f;
+};
+```
+
+### Weapon Animation State
+
+```cpp
+USTRUCT(BlueprintType)
+struct FWeaponInteractionAnimState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bHasActiveInteraction = false;
+
+    UPROPERTY(BlueprintReadWrite)
+    FGameplayTag CurrentStepId;
+
+    UPROPERTY(BlueprintReadWrite)
+    EWeaponInteractionPhase CurrentPhase = EWeaponInteractionPhase::None;
+
+    UPROPERTY(BlueprintReadWrite)
+    float StepAlpha = 0.f;
+
+    UPROPERTY(BlueprintReadWrite)
+    EHand ManipulationHand = EHand::None;
+
+    UPROPERTY(BlueprintReadWrite)
+    FWeaponHandIKTarget LeftHand;
+
+    UPROPERTY(BlueprintReadWrite)
+    FWeaponHandIKTarget RightHand;
+
+    UPROPERTY(BlueprintReadWrite)
+    FWeaponPoseOffsetAnimState WeaponPoseOffset;
+
+    UPROPERTY(BlueprintReadWrite)
+    TArray<FWeaponMovingPartAnimState> MovingParts;
 };
 ```
 
@@ -174,244 +293,371 @@ class UWeaponAnimInstance : public UAnimInstance
     GENERATED_BODY()
 
 public:
-    UPROPERTY(BlueprintReadOnly, Category="Weapon|IK")
-    FWeaponHandIKTarget LeftHandTarget;
+    UPROPERTY(BlueprintReadOnly, Category="Weapon|Interaction")
+    FWeaponInteractionAnimState WeaponInteractionState;
 
-    UPROPERTY(BlueprintReadOnly, Category="Weapon|IK")
-    FWeaponHandIKTarget RightHandTarget;
+    UFUNCTION(BlueprintCallable, Category="Weapon|Interaction")
+    void SetWeaponInteractionState(const FWeaponInteractionAnimState& NewState);
 
-    UPROPERTY(BlueprintReadOnly, Category="Weapon|Pose")
-    FWeaponPoseOffsetAnimState WeaponPoseOffset;
+    UFUNCTION(BlueprintCallable, Category="Weapon|Interaction")
+    void ClearWeaponInteractionState();
 
-    UPROPERTY(BlueprintReadOnly, Category="Weapon|State")
-    FGameplayTag CurrentWeaponInteractionPhase;
-
-    UPROPERTY(BlueprintReadOnly, Category="Weapon|State")
-    FGameplayTag CurrentReloadStep;
-
-    UPROPERTY(BlueprintReadOnly, Category="Weapon|State")
-    float CurrentStepAlpha = 0.f;
-
-    void SetWeaponHandTarget(EHand Hand, const FWeaponHandIKTarget& Target);
-    void SetWeaponPoseOffset(const FWeaponPoseOffsetAnimState& Offset);
+    UFUNCTION(BlueprintPure, Category="Weapon|Interaction")
+    bool HasActiveWeaponInteraction() const;
 };
 ```
 
-`UProceduralWeaponManipulationComponent` should update these fields before animation evaluation.
+The manipulation component pushes a complete state struct instead of setting unrelated loose variables one by one.
+
+This reduces mismatch bugs where `CurrentStepAlpha` updates but hand target data remains from the previous step.
 
 ---
 
-## Control Rig Inputs
+## Manipulation Component Push Contract
 
-Control Rig should receive:
+`UProceduralWeaponManipulationComponent` should build one coherent `FWeaponInteractionAnimState` per frame.
 
-```text
-LeftHandTargetTransform
-RightHandTargetTransform
-LeftElbowPoleTarget
-RightElbowPoleTarget
-LeftHandAlpha
-RightHandAlpha
-LeftGripAlpha
-RightGripAlpha
-WeaponPoseOffset
-SpineAssistAlpha
-ShoulderAssistAlpha
-CurrentInteractionPhase
+```cpp
+void UProceduralWeaponManipulationComponent::PushToAnimInstance()
+{
+    ACharacter* Character = Cast<ACharacter>(GetOwner());
+    if (!Character)
+    {
+        return;
+    }
+
+    USkeletalMeshComponent* Mesh = Character->GetMesh();
+    if (!Mesh)
+    {
+        return;
+    }
+
+    UWeaponAnimInstance* Anim = Cast<UWeaponAnimInstance>(Mesh->GetAnimInstance());
+    if (!Anim)
+    {
+        return;
+    }
+
+    Anim->SetWeaponInteractionState(CurrentAnimState);
+}
 ```
 
-These inputs are animation-facing data only. They do not decide gameplay state.
+Do not let AnimBP pull gameplay state directly from weapon components every frame. Push a resolved animation state.
+
+---
+
+## Target Generation Responsibilities
+
+The manipulation component generates:
+
+```text
+left/right hand target transforms
+left/right elbow pole positions
+finger grip alpha
+contact state tags
+weapon pose offset anim state
+moving part visual states
+step alpha
+current interaction phase
+```
+
+Control Rig consumes these values.
+
+Control Rig should not call the planner or reload component.
 
 ---
 
 ## AnimGraph Order
 
-Recommended order:
+Recommended AnimGraph order:
 
 ```text
-1. Base locomotion pose
-2. Weapon carry / aim upper-body layer
-3. Reload or manipulation pose offset layer
-4. Control Rig hand IK / elbow / spine solve
-5. Additive recoil / camera sway optional
-6. Finger/grip pose optional
+1. Base locomotion pose.
+2. Additive or layered weapon carry/aim pose.
+3. Reload/manipulation upper-body pose offset layer if needed.
+4. Control Rig node for weapon interaction solve.
+5. Recoil/camera sway/additive aim noise if those do not break hand contacts.
+6. Finger/grip pose layer if not solved inside Control Rig.
+7. Output pose.
 ```
 
-Important:
+If recoil or additive sway affects weapon hands, it must run before final hand contact correction or be applied to both weapon and hands consistently.
+
+---
+
+## Control Rig Variables
+
+Expose these variables to the Control Rig graph:
 
 ```text
-weapon interaction IK should run after base locomotion and weapon carry pose
-weapon interaction IK should run before final additive cosmetic layers if those layers affect weapon hands
+bWeaponInteractionActive
+CurrentInteractionPhase
+StepAlpha
+ManipulationHand
+LeftHandTargetWorld
+RightHandTargetWorld
+LeftElbowPoleWorld
+RightElbowPoleWorld
+LeftHandPositionAlpha
+RightHandPositionAlpha
+LeftHandRotationAlpha
+RightHandRotationAlpha
+LeftGripAlpha
+RightGripAlpha
+LeftContactState
+RightContactState
+WeaponPoseOffsetLocal
+WeaponPoseOffsetAlpha
+SpineAssistAlpha
+ShoulderAssistAlpha
+```
+
+Optional:
+
+```text
+MovingPartStates
+DebugDrawEnabled
+LODLevel
 ```
 
 ---
 
 ## Control Rig Solve Order
 
-Recommended Control Rig order:
+Recommended solve order:
 
 ```text
-1. Read current hand, elbow, spine, and weapon targets.
-2. Apply weapon pose offset to weapon control or upper-body reference.
-3. Apply spine and clavicle assistance.
-4. Solve stabilizing hand/contact first.
-5. Solve manipulation hand second.
-6. Apply wrist orientation correction.
-7. Apply optional finger curl / grip pose.
+1. Read and cache input variables.
+2. Convert world-space hand and elbow targets to rig/component space.
+3. Apply weapon pose offset to upper-body/weapon reference if the project uses a character-held weapon control.
+4. Apply spine assist.
+5. Apply clavicle/shoulder assist.
+6. Solve stabilizing hand first.
+7. Solve manipulation hand second.
+8. Correct wrist orientation.
+9. Apply finger grip controls or expose grip alpha to AnimGraph layer.
+10. Output final upper-body pose.
 ```
 
-For two-hand weapon constraints, the stabilizing contact should not drift unless the action plan released it.
+Stabilizing contacts should be solved before manipulation contacts so the weapon does not visually drift while the manipulation hand moves.
 
 ---
 
-## Hand IK Method
+## Stabilizing Hand Rule
 
-Recommended MVP:
-
-```text
-Two Bone IK or FABRIK for arms
-explicit elbow pole target
-separate position and rotation alpha
-```
-
-For more advanced setups:
-
-```text
-FullBodyIK for upper-body assistance
-Control Rig custom constraints for weapon contacts
-per-hand grip pose blending
-```
-
-The system should preserve the principle from the procedural locomotion architecture: C++/runtime computes targets, AnimInstance receives targets, Control Rig applies IK.
-
----
-
-## Grip and Finger Poses
-
-Finger pose should be driven by grip phase.
+If a hand target is marked `bIsStabilizingContact`, it should preserve the authored contact point unless the current action plan released that contact.
 
 Examples:
 
 ```text
-NoContact → open hand
-PreGrip → partially open hand
-Contact → closing hand
-VisualAttached → closed grip
-Manipulating → strong grip
-Release → opening hand
+RightHand + shoulder stabilize while LeftHand reloads.
+LeftHand + shoulder stabilize while RightHand reloads in left-shoulder stance.
+Pistol main grip stabilizes while support hand manipulates slide or magazine.
+```
+
+The rig should not blend stabilizing contact to zero just because the other hand is active.
+
+---
+
+## IK Method
+
+MVP:
+
+```text
+Two Bone IK for each arm
+explicit elbow pole target
+separate position/rotation alpha
+wrist orientation correction
+```
+
+Advanced:
+
+```text
+Full Body IK for upper body assist
+FABRIK for longer reach chains
+Control Rig constraints for weapon contacts
+per-finger Control Rig controls
+```
+
+The chosen method may vary by character rig, but the inputs and ownership model should stay the same.
+
+---
+
+## Elbow Pole Generation
+
+Elbow pole positions should be generated by the manipulation component or a small animation helper.
+
+Basic rule:
+
+```text
+elbow pole = shoulder position + side direction * elbow side offset + forward/up adjustment
+```
+
+Mirroring rule:
+
+```text
+Left shoulder stance and right shoulder stance mirror elbow side preference,
+but do not mirror authored weapon socket axes.
+```
+
+Debug must draw elbow pole targets because wrong poles cause arm flipping.
+
+---
+
+## Grip and Finger Pose Contract
+
+Finger poses are driven by grip/contact phase.
+
+Mapping:
+
+```text
+NoContact        → open hand
+Approaching      → relaxed open hand
+PreGrip          → prepared hand shape
+Contact          → closing hand
+VisualAttached   → closed grip
+Manipulating     → strong grip
+Released         → opening hand
 ```
 
 Implementation options:
 
 ```text
+scalar FingerGripAlpha
 pose assets
 Control Rig finger controls
 animation curves
-simple scalar grip alpha for MVP
 ```
 
-MVP can use one scalar `FingerGripAlpha` per hand.
-
----
-
-## Object Visual Attachment
-
-Visual attachment should be controlled by the manipulation component based on the current action step.
-
-Examples:
-
-```text
-Magazine visual attached to weapon socket
-Magazine visual attached to left hand socket
-Magazine visual attached to right hand socket
-Magazine visual hidden in body slot
-Magazine visual spawned/dropped in world
-```
-
-Visual attachment may be predicted locally, but gameplay attachment must follow server-authoritative state defined in [Weapon Interaction Networking](./weapon-networking.md).
+MVP should use scalar `FingerGripAlpha` per hand. Production may use `GripPoseId` to select hand pose assets or finger control presets.
 
 ---
 
 ## Moving Weapon Parts
 
-For bolt, slide, pump, lever, and similar moving parts:
+Moving part state is generated by runtime execution and consumed visually.
+
+Rules:
 
 ```text
-reload executor drives moving part alpha
-weapon mesh applies bone/local offset
-hand target follows socket on moving part
+runtime sets MovingPartAlpha
+weapon mesh applies moving bone/part offset
+a hand target follows the moving part follow socket when required
 ```
 
-This should not be implemented as pure hand-driven physics.
+The hand should not physically simulate pulling the weapon part.
 
-MVP approach:
+For pump/bolt/slide:
 
 ```text
-MovingPartAlpha 0..1
-LocalAxis
-Distance
-BoneName
+moving part pose first
+follow socket transform second
+hand IK target follows follow socket third
 ```
 
-The weapon component can apply this through an AnimBP variable, Control Rig control, or direct skeletal control depending on project setup.
+If the project applies moving part offsets in the weapon AnimBP, the manipulation component must read the post-offset follow socket transform or compute equivalent transform from moving part state.
 
 ---
 
-## Remote Client Playback
+## Object Visual Attachment
 
-Remote clients receive replicated reload phase and reconstruct visuals.
+Object visual attachment is controlled by [Weapon Reload Object Lifecycle for Unreal Engine](./weapon-object-lifecycle-ue.md).
+
+Animation layer only needs to know:
 
 ```text
-OnRep_ReloadInstance
-  compute StepAlpha from server time
-  set CurrentReloadStep
-  set hand targets from local profile
-  set visual attachment state
-  play/seek procedural step
+object is visually in hand
+object is visually in weapon
+object is hidden/in body slot
+object is dropped
 ```
 
-Remote clients should not require exact per-frame replicated transforms.
+Do not use Control Rig to authoritatively attach gameplay objects.
 
 ---
 
-## LOD Rules
+## Owner Client vs Remote Client
 
-Suggested animation LOD:
+Owning client:
+
+```text
+may use predicted visual state immediately
+reconciles with server reload state
+may smooth correction over MaxPredictionCorrectionTime
+```
+
+Remote client:
+
+```text
+uses replicated ReloadInstance only
+computes StepAlpha from server time
+does not run prediction
+seeks visual state to current phase
+```
+
+Both should produce the same `FWeaponInteractionAnimState` shape for AnimInstance.
+
+---
+
+## Low LOD Behavior
+
+LOD must not affect gameplay.
+
+Suggested LODs:
 
 ```text
 LOD0:
-  full hand IK, elbow poles, weapon pose offset, fingers, moving parts
+  full hand IK, elbow poles, spine/clavicle assist, fingers, moving part follow
 
 LOD1:
   hand IK, elbow poles, moving parts, simplified fingers
 
 LOD2:
-  upper-body reload pose, object attachment states, moving parts
+  upper-body reload pose, object visual states, moving parts, no detailed fingers
 
 LOD3:
-  simple reload pose or no procedural details
+  no detailed procedural hands, only broad reload pose or no weapon interaction animation
 ```
 
-Gameplay commit points and mechanical state are unaffected by animation LOD.
+Even at LOD3:
+
+```text
+server commit points still apply
+mechanical state still replicates
+fire permission remains authoritative
+```
 
 ---
 
 ## Debug View
 
-UE debug should draw:
+Debug should draw or print:
 
 ```text
-left/right hand target
-left/right elbow pole
-pre-grip transform
-current grip/contact phase
-weapon pose offset axes
-moving part axis and alpha
-object visual attachment state
-server step alpha vs local visual alpha
+CurrentStepId
+CurrentInteractionPhase
+StepAlpha
+ManipulationHand
+LeftHand target
+RightHand target
+LeftElbow pole
+RightElbow pole
+PositionAlpha / RotationAlpha
+FingerGripAlpha
+ContactState
+WeaponPoseOffset
+MovingPartAlpha
+Owner/remote prediction state
+LOD level
 ```
 
-Use persistent debug drawing only in editor/debug builds.
+Debug should compare:
+
+```text
+server step alpha
+local visual step alpha
+phase error
+```
 
 ---
 
@@ -420,26 +666,51 @@ Use persistent debug drawing only in editor/debug builds.
 Minimum implementation:
 
 ```text
-1. UProceduralWeaponManipulationComponent computes hand targets.
-2. UWeaponAnimInstance stores left/right hand target structs.
-3. AnimGraph runs Control Rig after weapon carry pose.
-4. Control Rig solves both arms with elbow pole targets.
-5. Magazine visual can attach to hand or weapon socket.
-6. Bolt/slide/pump has a simple alpha-driven moving part state.
-7. Remote clients reconstruct step alpha from replicated server time.
+1. UProceduralWeaponManipulationComponent builds FWeaponInteractionAnimState.
+2. UWeaponAnimInstance stores one coherent FWeaponInteractionAnimState.
+3. AnimGraph evaluates base locomotion and weapon carry pose before weapon interaction Control Rig.
+4. Control Rig receives hand targets, elbow poles, grip alphas, phase, and step alpha.
+5. Control Rig solves stabilizing hand before manipulation hand.
+6. Magazine/round visual attachment is handled outside Control Rig by object lifecycle code.
+7. Moving parts expose alpha and follow socket information.
+8. Remote clients reconstruct StepAlpha from replicated state and push the same anim state shape.
+9. LOD can simplify visuals but cannot affect gameplay.
+10. Debug draws targets, poles, phase, alpha, and moving parts.
 ```
+
+---
+
+## Failure Cases To Handle
+
+Implementation must handle:
+
+```text
+AnimInstance missing or wrong class
+Control Rig node not active at low LOD
+weapon mesh missing follow socket
+moving part state exists but moving part definition missing
+predicted target corrected by server
+hand target disabled mid-step due to interruption
+weapon switched while reload animation is active
+remote client becomes relevant mid-step
+```
+
+All cases should clear or rebuild `FWeaponInteractionAnimState` rather than leaving stale hand targets active.
 
 ---
 
 ## Final Formula
 
 ```text
-UE weapon animation execution =
-  replicated/planned interaction phase
-  + C++ generated hand/object/weapon targets
-  + AnimInstance state transfer
-  + Control Rig IK solve
-  + local visual reconstruction.
+UE weapon animation implementation =
+  coherent animation state struct
+  + runtime-generated hand/object/weapon targets
+  + AnimInstance bridge
+  + Control Rig solve order
+  + moving part follow
+  + object lifecycle separation
+  + LOD-safe visual simplification
+  + debug visibility.
 ```
 
 The animation stack visualizes the interaction plan. It does not own the interaction logic.
