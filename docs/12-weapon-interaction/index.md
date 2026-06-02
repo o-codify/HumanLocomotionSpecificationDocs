@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1320
+version: 26.602.1325
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -24,6 +24,7 @@ hand assignment and reachability solving
 animation execution for reaching/gripping/manipulation
 multiplayer-safe gameplay state
 Unreal Engine implementation mapping
+near-implementation UE runtime architecture
 ```
 
 The section is split into two levels:
@@ -71,6 +72,10 @@ Defines the multiplayer model: server authority, client prediction, remote-clien
 
 Maps the engine-agnostic data model into UE 5.7 DataAssets, components, C++ structs, editor validation, preview tools, replication structs, and Mermaid implementation diagrams.
 
+[Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md)
+
+Defines the near-implementation-level UE 5.7 runtime architecture: source layout, concrete enums and structs, `UWeaponInteractionComponent`, `UWeaponReloadComponent`, replicated state, RPCs, `OnRep` handlers, server executor loop, commit points, prediction, interruption, tick order, object visual attachment, and implementation checklist.
+
 [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md)
 
 Maps the animation execution model into UE 5.7 AnimInstance state, Control Rig inputs, hand IK targets, elbow poles, weapon pose offsets, moving part animation, visual object attachment, animation LOD, and remote-client playback.
@@ -96,7 +101,8 @@ weapon component source layout
 5. Procedural Weapon Reloading
 6. Weapon Interaction Networking
 7. Weapon Interaction Profile for Unreal Engine
-8. Weapon Animation and Control Rig for Unreal Engine
+8. Weapon Runtime Implementation for Unreal Engine
+9. Weapon Animation and Control Rig for Unreal Engine
 ```
 
 ---
@@ -112,6 +118,7 @@ flowchart TD
     Reload[Procedural Weapon Reloading]
     Net[Weapon Interaction Networking]
     UEProfile[Weapon Interaction Profile for Unreal Engine]
+    UERuntime[Weapon Runtime Implementation for Unreal Engine]
     UERig[Weapon Animation and Control Rig for Unreal Engine]
 
     Data --> Holding
@@ -126,8 +133,13 @@ flowchart TD
     Solvers --> UEProfile
     Reload --> UEProfile
     Net --> UEProfile
+    UEProfile --> UERuntime
+    Holding --> UERuntime
+    Solvers --> UERuntime
+    Reload --> UERuntime
+    Net --> UERuntime
     AnimExec --> UERig
-    UEProfile --> UERig
+    UERuntime --> UERig
     Net --> UERig
 ```
 
@@ -156,8 +168,11 @@ Reload executor:
 Networking layer:
   replicates gameplay state and phase, not IK every frame.
 
-Engine implementation:
-  maps these rules to components, assets, animation systems, networking, and editor tools.
+UE runtime implementation:
+  owns concrete components, replicated structs, RPCs, OnRep handlers, executor loop, prediction, and tick/update order.
+
+UE animation implementation:
+  maps runtime targets into AnimInstance and Control Rig.
 ```
 
 ---
@@ -173,7 +188,8 @@ Weapon interaction =
   + animation execution targets
   + gameplay mechanical state
   + network-safe replication
-  + engine-specific animation execution.
+  + UE runtime implementation
+  + UE animation implementation.
 ```
 
 The documents in this section should be detailed enough for an AI or engineer to implement the system directly, while still separating core logic from Unreal Engine details.
