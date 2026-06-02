@@ -2,7 +2,7 @@
 id: weapon-contact-quality
 title: Weapon Contact Quality
 status: draft
-version: 26.602.1529
+version: 26.602.1551
 tags: [ weapon, interaction, contacts, stability, ik ]
 ---
 
@@ -10,9 +10,16 @@ tags: [ weapon, interaction, contacts, stability, ik ]
 
 ## Purpose
 
-This document defines how weapon interaction represents the quality of hand, shoulder, support, and object contacts.
+This document defines how weapon interaction represents the quality of hand, shoulder, support, sight, cheek, object, and moving-part contacts.
 
 A contact should not be only `active` or `inactive`. Procedural weapon interaction needs to know whether a contact is strong, partial, slipping, recovering, blocked, or lost.
+
+Important boundary:
+
+```text
+Contact quality is procedural confidence for animation, IK, planning, and visual interaction stability.
+It is not an exact physics simulation of grip force, friction, recoil control, or human biomechanics.
+```
 
 ---
 
@@ -21,15 +28,18 @@ A contact should not be only `active` or `inactive`. Procedural weapon interacti
 This document only describes contact quality for weapon interaction:
 
 ```text
-hand to grip
+hand to weapon grip
 hand to support grip
+support hand to main hand for two-handed handgun support
 shoulder to stock
+cheek/face relation to stocked weapon for ADS presentation
+sight/eye alignment quality for ADS presentation
 hand to magazine/object
 hand to moving part
 object to weapon socket
 ```
 
-It does not own physical damage, locomotion balance, camera shake, or inventory state.
+It does not own physical damage, locomotion balance, camera shake, projectile behavior, real firearm ballistics, or inventory state.
 
 ---
 
@@ -64,7 +74,7 @@ The hand is close enough to begin shaping fingers or aligning wrist, but the con
 
 ### Active
 
-The contact is valid and stable enough for its role.
+The contact is valid and stable enough for its procedural role.
 
 ### Partial
 
@@ -74,7 +84,9 @@ Examples:
 
 ```text
 support hand touches weapon but does not provide full support
+support hand touches main hand for pistol support but is not fully seated
 shoulder contact is close but not seated
+cheek/sight relation is close but not ADS-ready
 magazine is aligned but not locked
 ```
 
@@ -84,7 +96,7 @@ The contact is degrading over time.
 
 ### Recovering
 
-The system is moving the hand/object back into a stable contact.
+The system is moving the hand/object/weapon back into a stable contact.
 
 ### Blocked
 
@@ -107,13 +119,18 @@ Recommended continuous values:
 ```text
 GripQuality: 0..1
 SupportContactQuality: 0..1
+HandToHandSupportQuality: 0..1
 ShoulderContactQuality: 0..1
+CheekContactQuality: 0..1
+SightEyeAlignmentQuality: 0..1
 ObjectAlignmentQuality: 0..1
 MovingPartContactQuality: 0..1
 ContactConfidence: 0..1
 ```
 
-`ContactConfidence` represents how trustworthy the contact is for planning.
+`ContactConfidence` represents how trustworthy the contact is for procedural planning and visual stability.
+
+It should not be interpreted as exact physical grip strength.
 
 ---
 
@@ -130,7 +147,9 @@ Example inputs:
 ```text
 main grip quality
 support grip quality
-shoulder contact quality
+hand-to-hand support quality for pistols
+shoulder contact quality for stocked weapons
+cheek/sight alignment quality for ADS presentation
 weapon archetype requirement
 current pose state
 temporary plan releases
@@ -148,6 +167,52 @@ Example interpretation:
 
 ---
 
+## Contact Requirements By Weapon Archetype
+
+### One-Handed Pistol
+
+```text
+MainGrip: required
+SupportGrip: none or not applicable
+HandToHandSupportContact: optional
+ShoulderContact: none
+CheekContact: none
+SightEyeAlignment: optional for visual aim alignment only
+```
+
+### Two-Handed Handgun
+
+```text
+MainGrip: required
+HandToHandSupportContact: preferred or required by pose
+SupportHand may contact main hand and/or weapon frame
+ShoulderContact: none
+CheekContact: none
+```
+
+The support hand for a handgun is often not a simple support socket on the weapon. It may support the firing hand, wrap around the main hand, or create a combined two-hand grip.
+
+### Stocked Rifle / Long Gun
+
+```text
+MainGrip: required
+SupportGrip: preferred or required
+ShoulderContact: preferred or required by pose
+CheekContact: optional/preferred for ADS presentation
+SightEyeAlignment: high quality required for ADS-ready presentation
+```
+
+### Pump / Foregrip Weapon
+
+```text
+MainGrip: required
+SupportGrip or PumpGrip: required when operating pump/foregrip
+MovingPartContactQuality: required during manipulation phase
+ShoulderContact: weapon/pose dependent
+```
+
+---
+
 ## Contact Requirements By Pose
 
 ### LowReady
@@ -155,24 +220,32 @@ Example interpretation:
 ```text
 MainGrip: required
 SupportGrip: optional/preferred for long guns
+HandToHandSupportContact: optional for handguns
 ShoulderContact: optional
+CheekContact: none
 ```
 
-### HipFire
+### HipFire / NonADSFire Pose
 
 ```text
 MainGrip: required
 SupportGrip: preferred or required for long guns
-ShoulderContact: optional/partial
+HandToHandSupportContact: preferred for two-handed handgun pose
+ShoulderContact: optional/partial for stocked weapons
+SightEyeAlignment: not strict
 ```
+
+`HipFire` is a game-facing label for a non-sight-aligned fire-ready weapon pose. It does not necessarily mean the weapon is literally held at the hip.
 
 ### AimDownSights
 
 ```text
 MainGrip: required
 SupportGrip: preferred or required for long guns
-ShoulderContact: preferred for stocked weapons
-SightAlignment: high quality required for ADS-ready state
+HandToHandSupportContact: preferred for two-handed handgun ADS/presentation pose
+ShoulderContact: preferred or required for stocked weapons
+CheekContact: optional/preferred for stocked ADS presentation
+SightEyeAlignment: high quality required for ADS-ready presentation
 ```
 
 ### Reloading
@@ -180,6 +253,7 @@ SightAlignment: high quality required for ADS-ready state
 ```text
 Remaining contacts must keep weapon from becoming unsupported.
 Released contacts must be marked ReleasedByPlan.
+Required reload object contact must reach its authored quality threshold before commit.
 ```
 
 ---
@@ -212,6 +286,7 @@ can fire visual readiness be reported?
 can this moving part be operated?
 should support hand recover first?
 should action fall back to safer pose?
+should handgun support recover as hand-to-hand contact instead of weapon socket contact?
 ```
 
 ---
@@ -224,7 +299,9 @@ Animation may use contact quality for:
 IK alpha
 finger grip alpha
 wrist correction alpha
+hand-to-hand support pose alpha
 shoulder stock settle
+cheek/sight presentation settle
 weapon pose offset strength
 object attachment blend
 recovery blend speed
@@ -237,6 +314,15 @@ SupportContactQuality = 0.3
 → support hand IK remains active but weak
 → weapon pose offset increases
 → solver may request support recovery
+```
+
+Example for two-handed handgun:
+
+```text
+HandToHandSupportQuality = 0.4
+→ support hand remains visually near main hand
+→ two-hand pistol pose is not yet fully stable
+→ fire visual readiness may stay degraded until support settles
 ```
 
 ---
@@ -269,6 +355,8 @@ A contact may fail when:
 ```text
 authored socket is missing
 hand cannot reach target
+hand-to-hand support target cannot be formed
+cheek/sight alignment reference is missing for a stocked ADS pose that requires it
 object alignment is invalid
 axis is wrong
 mirror stage breaks target
@@ -288,9 +376,11 @@ quality value
 confidence value
 required threshold
 current pose requirement
+weapon archetype requirement
 released by plan or accidental loss
 time below threshold
 recovery target
+procedural confidence note when shown as non-physical value
 ```
 
 ---
@@ -299,9 +389,9 @@ recovery target
 
 ```text
 Contact quality =
-  discrete contact state
-  + continuous quality score
-  + confidence
+  procedural contact state
+  + continuous confidence/quality score
+  + weapon archetype requirements
   + pose-specific thresholds
   + recovery behavior.
 ```
