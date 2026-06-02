@@ -2,7 +2,7 @@
 id: weapon-animation-and-control-rig-for-unreal-engine
 title: Weapon Animation and Control Rig for Unreal Engine
 status: draft
-version: 26.602.1418
+version: 26.602.1554
 tags: [ weapon, unreal-engine, ue5.7, animation, control-rig, ik, anim-instance ]
 ---
 
@@ -55,8 +55,10 @@ animation-facing target storage
 hand target smoothing
 Control Rig input transfer
 IK solve order
-spine/clavicle/shoulder assist
+spine/clavicle/shoulder assist requests
 finger/grip pose blending
+hand-to-hand handgun support pose blending
+shoulder/cheek/sight presentation settling
 moving part visual following
 animation LOD behavior
 visual debug drawing
@@ -70,8 +72,11 @@ hand assignment decisions
 server authority
 gameplay commit points
 inventory mutation
-mechanical state authority
+mechanical interaction state authority
 object lifecycle authority
+camera behavior
+body orientation solver
+locomotion speed
 ```
 
 The AnimBP and Control Rig visualize already resolved state. They must not decide gameplay validity.
@@ -108,15 +113,16 @@ flowchart TD
 Recommended frame order on clients:
 
 ```text
-1. Replicated reload/mechanical state updates through OnRep or local prediction.
+1. Replicated reload/mechanical interaction state updates through OnRep or local prediction.
 2. UProceduralWeaponManipulationComponent computes current visual state and StepAlpha.
-3. Manipulation component builds left/right hand targets, elbow poles, grip states, and weapon pose offset.
-4. Manipulation component pushes animation-facing data into UWeaponAnimInstance.
-5. AnimInstance update reads stored weapon interaction state.
-6. AnimGraph evaluates locomotion/weapon base pose.
-7. Control Rig node solves weapon interaction hands/spine/shoulders.
-8. Optional cosmetic additive layers run.
-9. Final pose is output.
+3. Manipulation component builds canonical left/right hand targets, elbow poles, grip states, contact quality summary, and weapon pose offset.
+4. Presentation/mirroring stage converts canonical targets into presented targets if required.
+5. Manipulation component pushes animation-facing data into UWeaponAnimInstance.
+6. AnimInstance update reads stored weapon interaction state.
+7. AnimGraph evaluates locomotion/weapon base pose.
+8. Control Rig node solves weapon interaction hands/spine/clavicle/shoulders.
+9. Optional cosmetic additive layers run.
+10. Final pose is output.
 ```
 
 The manipulation component must update before animation evaluation. If the project uses custom tick groups, add tick prerequisites accordingly.
@@ -153,6 +159,41 @@ Control Rig converts to rig/component space once at graph start.
 
 ---
 
+## Reachability Is Not Only Distance
+
+Weapon interaction reachability and animation solving should not be implemented as a simple hand-to-target distance check.
+
+At minimum, reachability/IK quality should consider:
+
+```text
+arm length
+max extension
+elbow pole validity
+wrist comfort
+shoulder/clavicle assist request
+current contact quality
+target rotation difficulty
+weapon pose offset allowance
+simple body/weapon collision avoidance
+presentation mirroring state
+```
+
+This is still procedural animation reachability, not full anatomical simulation.
+
+The solver may output:
+
+```text
+bReachable
+ReachCost
+bRequiresClavicleAssist
+bRequiresShoulderAssist
+bViolatesWristComfort
+bViolatesElbowPolePreference
+SuggestedPoseAdjustment
+```
+
+---
+
 ## Animation Runtime Structs
 
 ### Hand IK Target
@@ -182,6 +223,12 @@ struct FWeaponHandIKTarget
     float FingerGripAlpha = 0.f;
 
     UPROPERTY(BlueprintReadWrite)
+    float ContactQuality = 0.f;
+
+    UPROPERTY(BlueprintReadWrite)
+    float ContactConfidence = 0.f;
+
+    UPROPERTY(BlueprintReadWrite)
     FGameplayTag GripPoseId;
 
     UPROPERTY(BlueprintReadWrite)
@@ -192,6 +239,9 @@ struct FWeaponHandIKTarget
 
     UPROPERTY(BlueprintReadWrite)
     bool bIsManipulationHand = false;
+
+    UPROPERTY(BlueprintReadWrite)
+    bool bIsHandToHandSupport = false;
 };
 ```
 
@@ -214,6 +264,28 @@ struct FWeaponPoseOffsetAnimState
 
     UPROPERTY(BlueprintReadWrite)
     FGameplayTag MuzzlePolicy;
+};
+```
+
+### Aim/Stock Presentation State
+
+```cpp
+USTRUCT(BlueprintType)
+struct FWeaponAimContactAnimState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadWrite)
+    float ShoulderContactQuality = 0.f;
+
+    UPROPERTY(BlueprintReadWrite)
+    float CheekContactQuality = 0.f;
+
+    UPROPERTY(BlueprintReadWrite)
+    float SightEyeAlignmentQuality = 0.f;
+
+    UPROPERTY(BlueprintReadWrite)
+    float SightAlignmentErrorDegrees = 0.f;
 };
 ```
 
@@ -276,6 +348,9 @@ struct FWeaponInteractionAnimState
 
     UPROPERTY(BlueprintReadWrite)
     FWeaponPoseOffsetAnimState WeaponPoseOffset;
+
+    UPROPERTY(BlueprintReadWrite)
+    FWeaponAimContactAnimState AimContactState;
 
     UPROPERTY(BlueprintReadWrite)
     TArray<FWeaponMovingPartAnimState> MovingParts;
@@ -355,6 +430,9 @@ left/right hand target transforms
 left/right elbow pole positions
 finger grip alpha
 contact state tags
+contact quality/confidence values
+hand-to-hand support flag/pose alpha
+shoulder/cheek/sight quality values
 weapon pose offset anim state
 moving part visual states
 step alpha
@@ -375,13 +453,17 @@ Recommended AnimGraph order:
 1. Base locomotion pose.
 2. Additive or layered weapon carry/aim pose.
 3. Reload/manipulation upper-body pose offset layer if needed.
-4. Control Rig node for weapon interaction solve.
-5. Recoil/camera sway/additive aim noise if those do not break hand contacts.
-6. Finger/grip pose layer if not solved inside Control Rig.
-7. Output pose.
+4. Global presentation mirroring stage if implemented before Control Rig.
+5. Control Rig node for weapon interaction solve.
+6. Recoil/sway/additive aim noise if those do not break hand contacts.
+7. Final hand/contact correction.
+8. Finger/grip pose layer if not solved inside Control Rig.
+9. Output pose.
 ```
 
 If recoil or additive sway affects weapon hands, it must run before final hand contact correction or be applied to both weapon and hands consistently.
+
+Mirror in one place only. Do not mirror in AnimGraph, Control Rig, and object path independently.
 
 ---
 
@@ -406,10 +488,20 @@ LeftGripAlpha
 RightGripAlpha
 LeftContactState
 RightContactState
+LeftContactQuality
+RightContactQuality
+LeftContactConfidence
+RightContactConfidence
+bLeftHandToHandSupport
+bRightHandToHandSupport
+ShoulderContactQuality
+CheekContactQuality
+SightEyeAlignmentQuality
 WeaponPoseOffsetLocal
 WeaponPoseOffsetAlpha
 SpineAssistAlpha
 ShoulderAssistAlpha
+ClavicleAssistAlpha
 ```
 
 Optional:
@@ -418,6 +510,7 @@ Optional:
 MovingPartStates
 DebugDrawEnabled
 LODLevel
+PresentationMirrorState
 ```
 
 ---
@@ -429,14 +522,17 @@ Recommended solve order:
 ```text
 1. Read and cache input variables.
 2. Convert world-space hand and elbow targets to rig/component space.
-3. Apply weapon pose offset to upper-body/weapon reference if the project uses a character-held weapon control.
-4. Apply spine assist.
-5. Apply clavicle/shoulder assist.
-6. Solve stabilizing hand first.
-7. Solve manipulation hand second.
-8. Correct wrist orientation.
-9. Apply finger grip controls or expose grip alpha to AnimGraph layer.
-10. Output final upper-body pose.
+3. Apply presentation mirror only if this is the defined mirror stage.
+4. Apply weapon pose offset to upper-body/weapon reference if the project uses a character-held weapon control.
+5. Apply spine assist request if supplied by external body/animation layer.
+6. Apply clavicle/shoulder assist.
+7. Solve stabilizing hand first.
+8. Solve hand-to-hand support relationship if active.
+9. Solve manipulation hand second.
+10. Correct wrist orientation.
+11. Apply shoulder/cheek/sight presentation settling.
+12. Apply finger grip controls or expose grip alpha to AnimGraph layer.
+13. Output final upper-body pose.
 ```
 
 Stabilizing contacts should be solved before manipulation contacts so the weapon does not visually drift while the manipulation hand moves.
@@ -450,12 +546,36 @@ If a hand target is marked `bIsStabilizingContact`, it should preserve the autho
 Examples:
 
 ```text
-RightHand + shoulder stabilize while LeftHand reloads.
-LeftHand + shoulder stabilize while RightHand reloads in left-shoulder stance.
-Pistol main grip stabilizes while support hand manipulates slide or magazine.
+main grip + shoulder stabilize while support hand reloads
+pistol main grip stabilizes while support hand manipulates slide or magazine
+two-handed handgun support stabilizes by hand-to-hand support, not necessarily a weapon socket
 ```
 
 The rig should not blend stabilizing contact to zero just because the other hand is active.
+
+---
+
+## Hand-To-Hand Support Rule
+
+For two-handed handgun poses, the support hand may be solved relative to the main hand and weapon frame instead of a separate support grip socket.
+
+Inputs:
+
+```text
+MainHandTransform
+SupportHandToMainHandOffset
+SupportHandGripPoseId
+HandToHandSupportQuality
+```
+
+Rules:
+
+```text
+main hand remains primary weapon contact
+support hand follows a relative support pose
+support hand may also lightly align to weapon frame if authored
+finger/grip pose should represent combined two-hand grip
+```
 
 ---
 
@@ -468,6 +588,7 @@ Two Bone IK for each arm
 explicit elbow pole target
 separate position/rotation alpha
 wrist orientation correction
+contact quality alpha
 ```
 
 Advanced:
@@ -477,6 +598,7 @@ Full Body IK for upper body assist
 FABRIK for longer reach chains
 Control Rig constraints for weapon contacts
 per-finger Control Rig controls
+hand-to-hand support constraints
 ```
 
 The chosen method may vary by character rig, but the inputs and ownership model should stay the same.
@@ -496,8 +618,8 @@ elbow pole = shoulder position + side direction * elbow side offset + forward/up
 Mirroring rule:
 
 ```text
-Left shoulder stance and right shoulder stance mirror elbow side preference,
-but do not mirror authored weapon socket axes.
+presentation mirroring may mirror elbow side preference,
+but must not recompute authored weapon socket axes incorrectly.
 ```
 
 Debug must draw elbow pole targets because wrong poles cause arm flipping.
@@ -607,24 +729,24 @@ Suggested LODs:
 
 ```text
 LOD0:
-  full hand IK, elbow poles, spine/clavicle assist, fingers, moving part follow
+  full hand IK, elbow poles, spine/clavicle assist, fingers, moving part follow, hand-to-hand support, cheek/sight settling
 
 LOD1:
-  hand IK, elbow poles, moving parts, simplified fingers
+  hand IK, elbow poles, moving parts, simplified fingers, simplified contact quality
 
 LOD2:
-  upper-body reload pose, object visual states, moving parts, no detailed fingers
+  upper-body reload/weapon pose, object visual states, moving parts, no detailed fingers
 
 LOD3:
-  no detailed procedural hands, only broad reload pose or no weapon interaction animation
+  no detailed procedural hands, only broad reload/weapon pose or no detailed weapon interaction animation
 ```
 
 Even at LOD3:
 
 ```text
 server commit points still apply
-mechanical state still replicates
-fire permission remains authoritative
+mechanical interaction state still replicates
+interaction fire readiness remains external/backend-bounded
 ```
 
 ---
@@ -645,9 +767,16 @@ RightElbow pole
 PositionAlpha / RotationAlpha
 FingerGripAlpha
 ContactState
+ContactQuality
+ContactConfidence
+HandToHandSupportQuality
+ShoulderContactQuality
+CheekContactQuality
+SightEyeAlignmentQuality
 WeaponPoseOffset
 MovingPartAlpha
 Owner/remote prediction state
+PresentationMirrorState
 LOD level
 ```
 
@@ -669,13 +798,14 @@ Minimum implementation:
 1. UProceduralWeaponManipulationComponent builds FWeaponInteractionAnimState.
 2. UWeaponAnimInstance stores one coherent FWeaponInteractionAnimState.
 3. AnimGraph evaluates base locomotion and weapon carry pose before weapon interaction Control Rig.
-4. Control Rig receives hand targets, elbow poles, grip alphas, phase, and step alpha.
-5. Control Rig solves stabilizing hand before manipulation hand.
-6. Magazine/round visual attachment is handled outside Control Rig by object lifecycle code.
-7. Moving parts expose alpha and follow socket information.
-8. Remote clients reconstruct StepAlpha from replicated state and push the same anim state shape.
-9. LOD can simplify visuals but cannot affect gameplay.
-10. Debug draws targets, poles, phase, alpha, and moving parts.
+4. Control Rig receives hand targets, elbow poles, grip alphas, contact quality, phase, and step alpha.
+5. Control Rig solves stabilizing contact before manipulation contact.
+6. Hand-to-hand support is supported for two-handed handgun poses if that archetype is used.
+7. Magazine/round visual attachment is handled outside Control Rig by object lifecycle code.
+8. Moving parts expose alpha and follow socket information.
+9. Remote clients reconstruct StepAlpha from replicated state and push the same anim state shape.
+10. LOD can simplify visuals but cannot affect interaction state.
+11. Debug draws targets, poles, contacts, phase, alpha, and moving parts.
 ```
 
 ---
@@ -688,11 +818,14 @@ Implementation must handle:
 AnimInstance missing or wrong class
 Control Rig node not active at low LOD
 weapon mesh missing follow socket
+hand-to-hand support reference missing for handgun pose that requires it
+cheek/sight reference missing for stocked ADS pose that requires it
 moving part state exists but moving part definition missing
 predicted target corrected by server
 hand target disabled mid-step due to interruption
 weapon switched while reload animation is active
 remote client becomes relevant mid-step
+mirror stage applied twice
 ```
 
 All cases should clear or rebuild `FWeaponInteractionAnimState` rather than leaving stale hand targets active.
@@ -705,12 +838,9 @@ All cases should clear or rebuild `FWeaponInteractionAnimState` rather than leav
 UE weapon animation implementation =
   coherent animation state struct
   + runtime-generated hand/object/weapon targets
-  + AnimInstance bridge
-  + Control Rig solve order
-  + moving part follow
-  + object lifecycle separation
-  + LOD-safe visual simplification
-  + debug visibility.
+  + contact quality values
+  + hand-to-hand support for handgun archetypes
+  + shoulder/cheek/sight presentation quality for stocked ADS
+  + explicit IK solve order
+  + Control Rig consumes resolved state only.
 ```
-
-The animation stack visualizes the interaction plan. It does not own the interaction logic.
