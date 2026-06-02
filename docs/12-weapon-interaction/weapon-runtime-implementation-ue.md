@@ -2,7 +2,7 @@
 id: weapon-runtime-implementation-for-unreal-engine
 title: Weapon Runtime Implementation for Unreal Engine
 status: draft
-version: 26.602.1324
+version: 26.602.1339
 tags: [ weapon, unreal-engine, ue5.7, runtime, replication, implementation, c++ ]
 ---
 
@@ -22,6 +22,28 @@ It uses the core logic from:
 - [Weapon Interaction Networking](./weapon-networking.md)
 
 Unlike the engine-agnostic documents, this document describes concrete UE components, structs, replication, RPCs, update order, executor loop, and file layout.
+
+---
+
+## UE API Verification Boundary
+
+This document is an implementation specification, not a generated compile-ready source file.
+
+The architecture follows standard Unreal Engine patterns:
+
+```text
+UActorComponent ownership
+UPROPERTY replication
+Server RPCs
+ReplicatedUsing / OnRep callbacks
+GetLifetimeReplicatedProps
+AnimInstance data bridge
+Control Rig consuming animation-facing targets
+```
+
+Before copying code directly into a project, verify the exact API names, includes, module dependencies, macro usage, and function signatures against the installed UE 5.7 build.
+
+Project-specific classes such as `UEquipmentComponent`, `UInventoryComponent`, `AWeaponActor`, and gameplay tags are placeholders for the game's actual framework.
 
 ---
 
