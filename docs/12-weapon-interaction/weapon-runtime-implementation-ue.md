@@ -2,7 +2,7 @@
 id: weapon-runtime-implementation-for-unreal-engine
 title: Weapon Runtime Implementation for Unreal Engine
 status: draft
-version: 26.602.1339
+version: 26.602.1345
 tags: [ weapon, unreal-engine, ue5.7, runtime, replication, implementation, c++ ]
 ---
 
@@ -25,25 +25,56 @@ Unlike the engine-agnostic documents, this document describes concrete UE compon
 
 ---
 
-## UE API Verification Boundary
+## UE 5.7 API Basis
 
-This document is an implementation specification, not a generated compile-ready source file.
+This implementation is written against Unreal Engine 5.7 C++ API patterns.
 
-The architecture follows standard Unreal Engine patterns:
+Verified UE 5.7 API concepts used by this document:
 
 ```text
-UActorComponent ownership
-UPROPERTY replication
-Server RPCs
-ReplicatedUsing / OnRep callbacks
+UActorComponent
+UCLASS
+USTRUCT
+UENUM
+UPROPERTY
+UFUNCTION
+BlueprintType
+BlueprintReadOnly
+BlueprintCallable
+Server RPC functions
+Reliable RPC specifier
+ReplicatedUsing
 GetLifetimeReplicatedProps
-AnimInstance data bridge
-Control Rig consuming animation-facing targets
+DOREPLIFETIME
+TObjectPtr
+FGameplayTag
+FTransform
+FTransform::TransformVectorNoScale
+AGameStateBase::GetServerWorldTimeSeconds
+UAnimInstance
+UDataAsset
+IsDataValid
+FDataValidationContext
+EDataValidationResult
 ```
 
-Before copying code directly into a project, verify the exact API names, includes, module dependencies, macro usage, and function signatures against the installed UE 5.7 build.
+Project-specific symbols used by this document:
 
-Project-specific classes such as `UEquipmentComponent`, `UInventoryComponent`, `AWeaponActor`, and gameplay tags are placeholders for the game's actual framework.
+```text
+AWeaponActor
+UEquipmentComponent
+UInventoryComponent
+UProceduralWeaponManipulationComponent
+UWeaponInteractionComponent
+UWeaponReloadComponent
+UWeaponAnimInstance
+UWeaponInteractionProfile
+FWeaponHandIKTarget
+FWeaponPoseOffsetAnimState
+native gameplay tag names such as TAG_Weapon_Reload_Commit_MagazineLocked
+```
+
+These project-specific symbols are part of this weapon interaction implementation and must be created by the project. They are not built-in Unreal Engine classes.
 
 ---
 
@@ -129,6 +160,25 @@ Source/GameEditor/Weapons/
     WeaponInteractionProfilePreviewActor.cpp
     WeaponInteractionValidation.cpp
 ```
+
+---
+
+## Required Includes
+
+Typical includes for the runtime component layer:
+
+```cpp
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/GameStateBase.h"
+#include "Net/UnrealNetwork.h"
+#include "GameplayTagContainer.h"
+#include "Animation/AnimInstance.h"
+#include "Engine/DataAsset.h"
+```
+
+Profile/editor validation code also needs editor-only validation includes in the editor module or behind `#if WITH_EDITOR`.
 
 ---
 
@@ -891,4 +941,4 @@ UE runtime implementation =
   + editor/profile validation.
 ```
 
-This document should be treated as the first implementation target for UE 5.7. Other UE documents describe profile authoring and animation rig details in more depth.
+This document is the concrete runtime implementation target for UE 5.7. Other UE documents describe profile authoring and animation rig details in more depth.
