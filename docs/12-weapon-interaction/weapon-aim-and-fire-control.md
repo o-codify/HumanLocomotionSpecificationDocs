@@ -2,7 +2,7 @@
 id: weapon-aim-and-fire-control
 title: Weapon Aim and Fire Control
 status: draft
-version: 26.602.1454
+version: 26.602.1554
 tags: [ weapon, aiming, fire-control, ads, hip-fire, networking ]
 ---
 
@@ -18,10 +18,10 @@ It covers only the parts of aiming/firing that are needed for weapon interaction
 aim source as an external input
 aim target as an external input
 muzzle/sight alignment as a weapon pose constraint
-hip fire as a weapon/hand/contact pose
+HipFire / NonADSFire as a weapon/hand/contact pose
 point aim as a weapon/hand/contact pose
 ADS as a weapon/hand/contact pose
-fire readiness from interaction state
+interaction fire readiness from interaction state
 local visual fire feedback requests
 remote fire visualization requests
 interaction with reload/manipulation state
@@ -37,7 +37,7 @@ Pose states are defined in [Weapon Pose State Model](./weapon-pose-state-model.m
 
 ```text
 Aiming is a weapon pose constraint.
-Fire readiness is an interaction-state output.
+Interaction fire readiness is an interaction-state output.
 The actual fire backend decides whether a shot is executed and what it does.
 ```
 
@@ -98,7 +98,7 @@ Do not store full projectile prediction or damage result here.
 None
 Relaxed
 LowReady
-HipFire
+HipFire / NonADSFire
 PointAim
 AimDownSights
 CoverAim as external cover-facing pose input if cover system exists
@@ -108,22 +108,25 @@ Aim mode usually corresponds to weapon pose state, but may be represented separa
 
 ---
 
-## Hip Fire
+## HipFire / NonADSFire
 
-Hip fire is a weapon/hand/contact pose where firing may be requested without strict sight alignment.
+HipFire is a game-facing label for a non-sight-aligned fire-ready weapon pose.
+
+It does not necessarily mean the weapon is literally held at the hip.
 
 Interaction rules:
 
 ```text
-weapon muzzle follows aim direction approximately
+weapon muzzle follows external aim direction approximately
 sight alignment is not strict
 main hand remains on grip
-support hand remains active for two-handed weapons unless released by another interaction
+support grip remains active for long guns unless released by another interaction
+hand-to-hand support may be active for two-handed handguns
 shoulder contact may be partial or absent depending on weapon
 weapon remains visually plausible relative to external aim direction
 ```
 
-Weapon interaction may output a hip-fire readiness state. The fire backend decides final shot execution.
+Weapon interaction may output NonADSFire readiness. The external fire backend decides final shot execution.
 
 ---
 
@@ -135,9 +138,12 @@ Interaction rules:
 
 ```text
 weapon sight aligns toward external aim intent
-muzzle direction follows aim direction more tightly than hip fire
-shoulder contact is preferred for long guns
-support hand contact is preferred
+muzzle direction follows aim direction more tightly than NonADSFire
+support grip contact is preferred or required for long guns
+hand-to-hand support contact is preferred for two-handed handguns
+shoulder contact is preferred or required for stocked weapons
+cheek contact may be preferred for stocked ADS presentation
+sight-eye alignment quality must pass ADS-ready threshold
 ADS entry/exit is a transition, not an instant snap
 ```
 
@@ -147,15 +153,16 @@ ADS does not own camera zoom, FOV, body yaw, turn-in-place, or locomotion speed.
 
 ## Point Aim
 
-Point aim is between hip fire and ADS as a weapon interaction pose.
+Point aim is between NonADSFire and ADS as a weapon interaction pose.
 
 Interaction rules:
 
 ```text
 weapon is raised deliberately
 sight alignment is not strict
-muzzle follows aim direction more closely than hip fire
+muzzle follows aim direction more closely than NonADSFire
 contacts are more constrained than relaxed/low-ready poses
+support/hand-to-hand contact quality is higher than NonADSFire
 ```
 
 ---
@@ -173,14 +180,18 @@ mechanical interaction state exposed to interaction
 reload/manipulation phase
 hand occupation
 hold stability
+contact quality thresholds
+hand-to-hand support quality for two-handed handguns
+shoulder/cheek/sight quality for stocked ADS
 external fire backend policy result if available
 ```
 
 Examples:
 
 ```text
-ADS + stable hold + external fire backend allows fire → interaction-ready
-HipFire + acceptable stability + external fire backend allows fire → interaction-ready
+ADS + stable long-gun hold + sight-eye alignment + external fire backend allows fire → interaction-ready
+Two-handed handgun + hand-to-hand support stable + external fire backend allows fire → interaction-ready
+NonADSFire + acceptable stability + external fire backend allows fire → interaction-ready
 Reloading before required interaction commit → interaction-not-ready
 Reloading after required commit + policy allows → interaction-ready or recovery-needed
 ```
@@ -203,6 +214,7 @@ FireReadinessRequest:
   InteractionPhase
   HandsOccupied
   HoldStability
+  ContactQualitySummary
   InteractionCommitState
 ```
 
@@ -280,6 +292,7 @@ It may output:
 ```text
 SightAlignmentErrorDegrees
 MuzzleAlignmentErrorDegrees
+SightEyeAlignmentQuality optional
 bAimPoseVisuallyAligned
 ```
 
@@ -354,7 +367,7 @@ CanRequestFireOnlyWhenStableHoldRestored
 If a fire request happens during reload:
 
 ```text
-weapon interaction reports current phase, hand occupation, and commit state
+weapon interaction reports current phase, hand occupation, contact quality, and commit state
 external fire backend decides whether a fire event is allowed
 weapon interaction performs visual recovery or fire-pose transition if needed
 ```
@@ -372,6 +385,8 @@ aim origin
 aim direction
 muzzle direction
 sight alignment error
+sight-eye alignment quality
+contact quality summary
 interaction fire readiness
 blocked reason from interaction or external backend
 mechanical interaction state
@@ -390,8 +405,9 @@ Interaction-facing aim/fire =
   + weapon pose state
   + weapon/muzzle/sight alignment
   + hand/contact stability
+  + archetype-specific support contacts
   + reload/manipulation state
-  + fire readiness output
+  + interaction fire readiness output
   + local/remote visual fire response.
 
 It is not the full weapon fire backend.
