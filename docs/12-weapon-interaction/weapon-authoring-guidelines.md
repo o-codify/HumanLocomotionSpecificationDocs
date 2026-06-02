@@ -2,7 +2,7 @@
 id: weapon-interaction-authoring-guidelines
 title: Weapon Interaction Authoring Guidelines
 status: draft
-version: 26.602.1531
+version: 26.602.1555
 tags: [ weapon, authoring, sockets, axes, editor, validation ]
 ---
 
@@ -12,7 +12,7 @@ tags: [ weapon, authoring, sockets, axes, editor, validation ]
 
 This document gives practical authoring rules for weapon interaction assets.
 
-It is written for technical animators, gameplay animators, weapon artists, and engineers who create weapon profiles, sockets, axes, reload object profiles, and preview data.
+It is written for technical animators, gameplay animators, weapon artists, and engineers who create weapon profiles, sockets, axes, reload object profiles, contact references, and preview data.
 
 ---
 
@@ -26,14 +26,16 @@ interaction points
 local axes
 hand grip points
 support grip points
+hand-to-hand support references
 stock/shoulder contact
+cheek/sight alignment references for stocked ADS presentation
 magazine/object alignment
 moving part paths
 mirror-safe authored data
 editor preview checks
 ```
 
-It does not define inventory, ammo economy, damage, projectile behavior, camera behavior, or locomotion speed.
+It does not define inventory, ammo economy, damage, projectile behavior, camera behavior, body orientation, or locomotion speed.
 
 ---
 
@@ -55,15 +57,18 @@ Most held weapons should define:
 
 ```text
 MainGripSocket
-SupportGripSocket optional or required by archetype
 MuzzleSocket
 WeaponRootSocket or RootBone reference
 ```
 
-Stocked weapons should also define:
+Depending on archetype, also define:
 
 ```text
-StockShoulderSocket
+SupportGripSocket optional or required for long guns
+HandToHandSupportReference optional/required for two-handed handgun poses
+StockShoulderSocket for stocked weapons
+CheekReferenceSocket optional/preferred for stocked ADS presentation
+SightReferenceSocket optional/preferred for ADS presentation
 ```
 
 Weapons with detachable magazines should define:
@@ -112,7 +117,7 @@ wrist rotation is within allowed range
 
 ## Support Grip Socket
 
-`SupportGripSocket` should represent the default support hand contact.
+`SupportGripSocket` should represent a weapon-side support hand contact.
 
 Rules:
 
@@ -131,6 +136,41 @@ SupportGrip_Magwell
 SupportGrip_Pump
 ```
 
+Do not force pistols into a fake support grip socket when their support is actually hand-to-hand.
+
+---
+
+## Hand-To-Hand Support Authoring For Handguns
+
+Two-handed handgun poses often require support hand relation to the main hand instead of a separate weapon socket.
+
+Author:
+
+```text
+HandToHandSupportReference
+SupportHandRelativeToMainHandOffset
+SupportHandGripPoseId
+OptionalSupportToWeaponFrameReference
+```
+
+Rules:
+
+```text
+main hand remains the primary weapon contact
+support hand may wrap around or brace the main hand
+support hand may optionally align partly to weapon frame
+combined two-hand grip pose should be previewed as a unit
+```
+
+Validation:
+
+```text
+support hand can reach relative pose
+support hand does not intersect main hand excessively
+finger pose supports combined grip
+mirrored presentation preserves relative hand-to-hand relationship
+```
+
 ---
 
 ## Stock Shoulder Socket
@@ -142,10 +182,45 @@ Rules:
 ```text
 place at the point that rests against the shoulder
 orient forward axis consistently with weapon forward
-validate ADS and hip-fire shoulder contact preview
+validate ADS and NonADSFire shoulder contact preview
 ```
 
 Stock contact should be authored as a contact point, not as a body orientation rule.
+
+---
+
+## Cheek And Sight References For Stocked ADS
+
+Stocked ADS presentation may need references for cheek/sight relation.
+
+Optional authored references:
+
+```text
+CheekReferenceSocket
+SightReferenceSocket
+RearSightSocket optional
+FrontSightSocket optional
+EyeReliefReference optional
+```
+
+Rules:
+
+```text
+CheekReferenceSocket describes where the face/cheek relation should settle visually
+SightReferenceSocket describes the sight alignment reference in weapon local space
+EyeReliefReference describes preferred eye distance if the project models it visually
+```
+
+These references are for weapon interaction presentation. They do not own camera FOV, camera placement, body yaw, or turn-in-place.
+
+Validation:
+
+```text
+ADS preview can settle shoulder contact
+ADS preview can reach acceptable sight-eye alignment quality
+mirrored presentation preserves sight/cheek relation
+missing cheek/sight references warn only if the archetype/pose requires them
+```
 
 ---
 
@@ -255,11 +330,13 @@ Check mirrored presentation for:
 
 ```text
 hand targets
+hand-to-hand support relation
 elbow poles
 magazine path
 object insert axis
 moving part path
 stock contact
+cheek/sight relation
 muzzle/sight visual alignment
 ```
 
@@ -274,7 +351,10 @@ Recommended naming style:
 ```text
 Socket_MainGrip
 Socket_SupportGrip_Default
+Socket_HandToHandSupportRef
 Socket_StockShoulder
+Socket_CheekReference
+Socket_SightReference
 Socket_Muzzle
 Socket_MagazineWell
 Socket_BoltHandle
@@ -288,7 +368,10 @@ Interaction point ids should be stable:
 ```text
 MainGrip
 SupportGrip
+HandToHandSupport
 StockShoulder
+CheekReference
+SightReference
 MagazineWell
 BoltHandle
 PumpGrip
@@ -306,8 +389,11 @@ Before accepting an authored weapon profile, preview:
 canonical hold pose
 mirrored presentation hold pose
 LowReady
-HipFire
+HipFire / NonADSFire
+PointAim
 ADS interaction pose
+hand-to-hand handgun support if archetype uses it
+shoulder/cheek/sight settling for stocked ADS if archetype uses it
 reload path
 object alignment
 moving part operation
@@ -326,7 +412,9 @@ axis points opposite semantic direction
 axis inferred from positions instead of authored local direction
 magazine insert tip placed at wrong end
 support grip too far for arm reach
+pistol forced to use fake support socket instead of hand-to-hand support
 stock socket too high/low for shoulder contact
+cheek/sight reference missing for stocked ADS profile that requires it
 moving part travel distance too short/long
 mirrored preview not checked
 object visual duplicates hidden by preview camera
@@ -340,9 +428,12 @@ socket renamed after sequence profile was authored
 ```text
 Good weapon interaction authoring =
   stable canonical sockets
+  + archetype-specific contacts
   + semantic local axes
   + object alignment sockets
   + moving part travel data
+  + hand-to-hand support data when needed
+  + cheek/sight references when needed
   + mirror-safe preview
   + validation before runtime.
 ```
