@@ -2,7 +2,7 @@
 id: weapon-interaction-networking
 title: Weapon Interaction Networking
 status: draft
-version: 26.602.1247
+version: 26.602.1336
 tags: [ weapon, networking, multiplayer, replication, prediction ]
 ---
 
@@ -20,6 +20,29 @@ Core rule:
 Replicate gameplay state and phase.
 Do not replicate procedural IK every frame.
 ```
+
+---
+
+## Ownership Boundary
+
+This document owns the multiplayer concepts:
+
+```text
+server authority
+client prediction
+remote-client reconstruction
+replicated phase model
+mechanical state replication concept
+commit point authority
+interrupt/recovery replication concept
+what should not be replicated
+```
+
+It does not own concrete Unreal Engine structs, RPC declarations, `OnRep` handlers, or `GetLifetimeReplicatedProps` implementation.
+
+The canonical UE implementation is defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
+
+Animation reconstruction is defined in [Weapon Animation Execution](./weapon-animation-execution.md) and [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md).
 
 ---
 
@@ -51,6 +74,8 @@ finger pose
 minor timing smoothing
 ```
 
+The client may predict visuals, but it must not authoritatively change ammo, inventory, magazine lock, chamber state, or firing eligibility.
+
 ---
 
 ## Multiplayer Flow
@@ -76,11 +101,11 @@ sequenceDiagram
 
 ---
 
-## Replicated State
+## Replicated Conceptual State
 
 The replicated state should be compact and deterministic enough for visual reconstruction.
 
-Recommended replicated fields:
+Conceptually replicated fields:
 
 ```text
 IsReloading
@@ -89,6 +114,7 @@ CurrentStepId
 StepIndex
 StepStartServerTime
 StepDuration
+InteractionPhase
 ResolvedHand
 ReloadObjectType
 ObjectVisualState
@@ -99,6 +125,8 @@ MechanicalState
 MechanicalStateRevision
 ```
 
+The canonical UE structs that represent this concept are defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
+
 Clients reconstruct current visual phase:
 
 ```text
@@ -107,11 +135,11 @@ Alpha = (LocalServerTimeEstimate - StepStartServerTime) / StepDuration
 
 ---
 
-## Mechanical State
+## Mechanical State Concept
 
 Mechanical state must be replicated because ammo count alone is not enough.
 
-Fields may include:
+Conceptual fields:
 
 ```text
 MagazineInserted
@@ -135,6 +163,8 @@ Bolt open with round not chambered.
 Shotgun tube partially loaded.
 Pump back but not forward.
 ```
+
+The exact UE struct is defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
 
 ---
 
@@ -182,6 +212,8 @@ continue local interpolation
 
 This supports relevancy changes and late packet arrival.
 
+UE-side reconstruction is implemented by [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md) and visualized through [Weapon Animation and Control Rig for Unreal Engine](./weapon-animation-control-rig-ue.md).
+
 ---
 
 ## Object Replication
@@ -220,6 +252,8 @@ ReloadCompleted
 ```
 
 A cosmetic event may play sound/effects, but gameplay state must come from the server commit.
+
+UE commit point mutation is implemented in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
 
 ---
 
@@ -263,7 +297,7 @@ player falls
 server detects invalid state
 ```
 
-Replicated interrupt data:
+Replicated interrupt concept:
 
 ```text
 InterruptReason
@@ -274,6 +308,8 @@ ReloadRevision
 ```
 
 Clients reconstruct recovery visually from the replicated recovery state.
+
+UE interrupt implementation is defined in [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
 
 ---
 
@@ -320,9 +356,9 @@ interrupt/recovery state
 Networked weapon interaction =
   server-authoritative gameplay state
   + replicated phase/timestamps
-  + replicated mechanical state
+  + replicated mechanical state concept
   + client-side procedural visual reconstruction
   + owning-client prediction and reconciliation.
 ```
 
-This keeps procedural weapon interaction cheap, deterministic enough, and safe for multiplayer.
+Concrete UE replication code belongs to [Weapon Runtime Implementation for Unreal Engine](./weapon-runtime-implementation-ue.md).
