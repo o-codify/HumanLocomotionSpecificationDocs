@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.602.1615
+version: 26.603.1348
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -17,6 +17,7 @@ Weapon interaction covers the physical/procedural relationship between a charact
 ```text
 holding weapons
 stabilizing weapons with hands/shoulder/support contacts
+numeric visual pose acceptance for hands, joints, grips, objects, and reloads
 hand-to-hand support for two-handed handgun poses
 cheek/sight alignment quality for stocked ADS presentation
 contact quality and hold pose lifecycle
@@ -64,6 +65,10 @@ Defines shared terms used across the weapon interaction section: action step, st
 [Weapon Transform Space Contract](./weapon-transform-space-contract.md)
 
 Defines the transform-space contract for weapon local space, object local space, hand socket space, character component space, world space, canonical interaction space, mirrored presentation space, and network-reconstructed state.
+
+[Weapon Visual Pose Numeric Contract](./weapon-visual-pose-numeric-contract.md)
+
+Defines numeric visual acceptance metrics for contact frame error, joint limits, elbow pole stability, reach/stretch, rifle/handgun holds, magazine insertion, object ownership, penetration/floating thresholds, frame-to-frame stability, and debug output.
 
 [Weapon Pose State Model](./weapon-pose-state-model.md)
 
@@ -247,48 +252,49 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 1. Weapon Interaction Boundaries
 2. Weapon Interaction Terminology
 3. Weapon Transform Space Contract
-4. Weapon Pose State Model
-5. Weapon Interaction Mirroring
-6. Weapon Interaction Phase Taxonomy
-7. Weapon Aim and Fire Control
-8. Weapon Interaction Archetypes
-9. Weapon Grip Pose Library
-10. Weapon Contact Quality
-11. Weapon Hold Pose Lifecycle
-12. Weapon Interaction Constraint Priority
-13. Weapon Interaction Data Model
-14. Weapon Holding and Stabilization
-15. Weapon Object Insertion Quality
-16. Weapon Moving Part Operation Profiles
-17. Weapon Solvers and Planning
-18. Weapon Animation Execution
-19. Weapon Authored vs Procedural Animation
-20. Weapon Interaction Interruptions
-21. Weapon Draw and Holster Interaction
-22. Procedural Weapon Reloading
-23. Weapon Obstruction Interaction Response
-24. Weapon First and Third Person Interaction Presentation
-25. Weapon Interaction Networking
-26. Weapon Interaction Correction Smoothing
-27. Weapon Interaction LOD
-28. Weapon Interaction Failure States
-29. Weapon Gameplay Tags for Unreal Engine
-30. Weapon Interaction Profile for Unreal Engine
-31. Weapon Reload Sequence Profile for Unreal Engine
-32. Weapon Reload Planner for Unreal Engine
-33. Weapon Runtime Implementation for Unreal Engine
-34. Weapon Holding and Aiming Implementation for Unreal Engine
-35. Weapon Reload Object Lifecycle for Unreal Engine
-36. Weapon Animation and Control Rig for Unreal Engine
-37. Weapon Editor Preview and Validation for Unreal Engine
-38. Weapon Interaction Authoring Guidelines
-39. Weapon Interaction Debugging
-40. Weapon Reference Implementation Flow for Unreal Engine
-41. Weapon MVP Task Checklist for Unreal Engine
-42. Weapon Holding Aiming and Fire Tests
-43. Weapon Interaction Archetype Test Matrix
-44. Weapon Interaction Tests and Acceptance Criteria
-45. Weapon Interaction Implementation Roadmap
+4. Weapon Visual Pose Numeric Contract
+5. Weapon Pose State Model
+6. Weapon Interaction Mirroring
+7. Weapon Interaction Phase Taxonomy
+8. Weapon Aim and Fire Control
+9. Weapon Interaction Archetypes
+10. Weapon Grip Pose Library
+11. Weapon Contact Quality
+12. Weapon Hold Pose Lifecycle
+13. Weapon Interaction Constraint Priority
+14. Weapon Interaction Data Model
+15. Weapon Holding and Stabilization
+16. Weapon Object Insertion Quality
+17. Weapon Moving Part Operation Profiles
+18. Weapon Solvers and Planning
+19. Weapon Animation Execution
+20. Weapon Authored vs Procedural Animation
+21. Weapon Interaction Interruptions
+22. Weapon Draw and Holster Interaction
+23. Procedural Weapon Reloading
+24. Weapon Obstruction Interaction Response
+25. Weapon First and Third Person Interaction Presentation
+26. Weapon Interaction Networking
+27. Weapon Interaction Correction Smoothing
+28. Weapon Interaction LOD
+29. Weapon Interaction Failure States
+30. Weapon Gameplay Tags for Unreal Engine
+31. Weapon Interaction Profile for Unreal Engine
+32. Weapon Reload Sequence Profile for Unreal Engine
+33. Weapon Reload Planner for Unreal Engine
+34. Weapon Runtime Implementation for Unreal Engine
+35. Weapon Holding and Aiming Implementation for Unreal Engine
+36. Weapon Reload Object Lifecycle for Unreal Engine
+37. Weapon Animation and Control Rig for Unreal Engine
+38. Weapon Editor Preview and Validation for Unreal Engine
+39. Weapon Interaction Authoring Guidelines
+40. Weapon Interaction Debugging
+41. Weapon Reference Implementation Flow for Unreal Engine
+42. Weapon MVP Task Checklist for Unreal Engine
+43. Weapon Holding Aiming and Fire Tests
+44. Weapon Interaction Archetype Test Matrix
+45. Weapon Interaction Tests and Acceptance Criteria
+46. Weapon Interaction Implementation Roadmap
 ```
 
 ---
@@ -300,6 +306,7 @@ flowchart TD
     Boundaries[Weapon Interaction Boundaries]
     Terms[Weapon Interaction Terminology]
     Spaces[Weapon Transform Space Contract]
+    VisualNumeric[Weapon Visual Pose Numeric Contract]
     Pose[Weapon Pose State Model]
     Mirror[Weapon Interaction Mirroring]
     Phases[Weapon Interaction Phase Taxonomy]
@@ -345,6 +352,7 @@ flowchart TD
 
     Boundaries --> Terms
     Boundaries --> Spaces
+    Boundaries --> VisualNumeric
     Boundaries --> Pose
     Boundaries --> Mirror
     Boundaries --> AimFire
@@ -367,11 +375,17 @@ flowchart TD
     Terms --> Reload
     Terms --> Net
 
+    Spaces --> VisualNumeric
     Spaces --> Data
     Spaces --> Mirror
     Spaces --> Insertion
     Spaces --> MovingOps
     Spaces --> UERig
+    VisualNumeric --> ContactQ
+    VisualNumeric --> Holding
+    VisualNumeric --> AnimExec
+    VisualNumeric --> UERig
+    VisualNumeric --> Tests
     Archetypes --> Holding
     Archetypes --> ContactQ
     Archetypes --> ArchetypeTests
@@ -486,6 +500,9 @@ Terminology:
 Transform space contract:
   prevents socket/axis/world/canonical/mirrored/network transform ambiguity.
 
+Visual pose numeric contract:
+  defines measurable pose validity for contacts, joints, elbow poles, reach, object insertion, ownership, floating/penetration, and frame-to-frame stability.
+
 Pose state model:
   defines weapon/hand/contact pose states and how temporary interactions enter/exit them, including external-state-driven sprint/cover variants.
 
@@ -580,16 +597,16 @@ UE object lifecycle:
   separates external gameplay object concepts from visual interaction object state.
 
 UE animation implementation:
-  maps runtime interaction targets into AnimInstance and Control Rig, including reachability, contact quality, hand-to-hand support, and stocked ADS presentation contacts.
+  maps runtime interaction targets into AnimInstance and Control Rig, including reachability, contact quality, hand-to-hand support, stocked ADS presentation contacts, and visual pose numeric validity.
 
 UE editor preview:
-  validates authored sockets, axes, sequences, hand assignments, and mirrored presentation before runtime.
+  validates authored sockets, axes, sequences, hand assignments, numeric pose validity, and mirrored presentation before runtime.
 
 Authoring guidelines:
   define how artists/technical animators should place sockets, axes, interaction points, object sockets, moving parts, hand-to-hand support data, cheek/sight references, and mirror-safe data.
 
 Debugging:
-  defines unified debug overlays and vocabulary for interaction state, constraints, contacts, objects, mirroring, networking, prediction, and LOD.
+  defines unified debug overlays and vocabulary for interaction state, constraints, contacts, objects, mirroring, networking, prediction, LOD, and numeric pose metrics.
 
 Reference flow:
   shows one complete implementation path from profile to replicated animation.
@@ -613,6 +630,7 @@ Weapon interaction =
   clear boundaries
   + shared terminology
   + transform-space contract
+  + visual pose numeric contract
   + weapon/hand/contact pose states
   + contact quality
   + interaction archetypes
