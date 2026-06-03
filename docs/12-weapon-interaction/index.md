@@ -2,7 +2,7 @@
 id: weapon-interaction
 title: Weapon Interaction
 status: draft
-version: 26.603.1349
+version: 26.603.1616
 tags: [ weapon, procedural-animation, upper-body, ik, networking, unreal-engine ]
 ---
 
@@ -35,7 +35,8 @@ bolt/slide/pump/charging-handle operation as mechanism interaction
 moving part operation profiles for bolt, slide, pump, lever, hinge, latch, and button controls
 hand assignment and reachability solving for weapon interaction points
 animation execution for reaching/gripping/manipulation
-authored-vs-procedural animation ownership policy
+procedural-first animation ownership policy
+authored assets only as optional support, not as interaction authority
 obstruction response from external obstruction results
 first/third-person interaction presentation from one canonical state
 multiplayer-safe interaction state reconstruction and correction smoothing
@@ -130,11 +131,11 @@ Defines the hand assignment solver, reachability solver, stability solver, reloa
 
 [Weapon Animation Execution](./weapon-animation-execution.md)
 
-Defines how validated action plans become visible upper-body interaction animation: reach trajectories, pre-grip, grip/contact phases, object visual attachment, weapon pose offsets, spine/shoulder assistance requests, elbow control, moving part following, animation LOD, and recovery animation.
+Defines how validated procedural action plans become visible upper-body interaction animation: reach trajectories, pre-grip, grip/contact phases, object visual attachment, weapon pose offsets, spine/shoulder assistance requests, elbow control, moving part following, animation LOD, and recovery animation.
 
-[Weapon Authored vs Procedural Animation](./weapon-authored-vs-procedural-animation.md)
+[Weapon Procedural Animation Ownership Policy](./weapon-authored-vs-procedural-animation.md)
 
-Defines how authored animation, procedural targets, IK, Control Rig, object alignment, moving part following, correction smoothing, and LOD share ownership without fighting each other.
+Defines the procedural-first animation ownership rule: procedural interaction targets, constraints, phases, contact quality, object paths, moving part states, and numeric pose validation are the source of truth; authored assets are optional support only.
 
 [Weapon Interaction Interruptions](./weapon-interaction-interruptions.md)
 
@@ -268,7 +269,7 @@ Defines implementation stages: foundations, MVP detachable magazine reload, tool
 17. Weapon Moving Part Operation Profiles
 18. Weapon Solvers and Planning
 19. Weapon Animation Execution
-20. Weapon Authored vs Procedural Animation
+20. Weapon Procedural Animation Ownership Policy
 21. Weapon Interaction Interruptions
 22. Weapon Draw and Holster Interaction
 23. Procedural Weapon Reloading
@@ -322,7 +323,7 @@ flowchart TD
     MovingOps[Weapon Moving Part Operation Profiles]
     Solvers[Weapon Solvers and Planning]
     AnimExec[Weapon Animation Execution]
-    AnimPolicy[Weapon Authored vs Procedural Animation]
+    ProceduralPolicy[Weapon Procedural Animation Ownership Policy]
     Interrupts[Weapon Interaction Interruptions]
     DrawHolster[Weapon Draw and Holster Interaction]
     Reload[Procedural Weapon Reloading]
@@ -419,10 +420,10 @@ flowchart TD
     Solvers --> AnimExec
     Solvers --> Reload
     Solvers --> DrawHolster
-    AnimExec --> AnimPolicy
+    AnimExec --> ProceduralPolicy
     AnimExec --> Reload
     AnimExec --> DrawHolster
-    AnimPolicy --> UERig
+    ProceduralPolicy --> UERig
     Interrupts --> Reload
     Interrupts --> DrawHolster
     Obstruction --> Holding
@@ -546,10 +547,10 @@ Solvers/planner:
   decide weapon interaction hand roles, reachability, stability, and manipulation plans.
 
 Animation execution:
-  turns a validated interaction plan into hand/object/weapon targets.
+  turns a validated procedural interaction plan into hand/object/weapon targets.
 
-Authored/procedural animation policy:
-  defines when authored motion wins and when procedural contact correctness wins.
+Procedural animation ownership policy:
+  defines procedural targets, constraints, phases, contact quality, object paths, moving part states, and numeric pose validation as the source of truth; authored assets are optional support only.
 
 Interruptions:
   define commit-aware cancellation and recovery for reload, draw, holster, mechanism manipulation, and prediction correction.
@@ -582,7 +583,7 @@ Gameplay tags:
   provide stable names for sequences, steps, commits, rejection reasons, recovery policies, contacts, grip poses, pose/fire interaction policies, and debug states.
 
 UE profile and sequence assets:
-  define authored weapon interaction data.
+  define authored weapon interaction data and optional support assets, not authored montage authority.
 
 UE planner:
   converts request/context/profile/sequence data into runtime interaction plans.
@@ -647,9 +648,10 @@ Weapon interaction =
   + object insertion quality
   + moving part operation profiles
   + solver decisions
-  + action plans
-  + animation execution targets
-  + authored/procedural animation ownership
+  + procedural action plans
+  + procedural animation execution targets
+  + procedural-first animation ownership
+  + optional authored support assets
   + interruptions and recovery
   + draw/holster interaction
   + reload/manipulation semantics
@@ -661,7 +663,7 @@ Weapon interaction =
   + interaction LOD
   + failure states
   + gameplay tags
-  + UE authored assets
+  + UE authored data assets
   + UE planner/runtime implementation
   + UE holding/aiming implementation
   + UE visual object lifecycle
