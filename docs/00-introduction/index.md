@@ -1,8 +1,8 @@
 ---
 id: introduction
 title: Introduction
-status: review
-version: 26.604.1324
+status: stable
+version: 26.606.1304
 tags: [ scope, policy, engine-agnostic, human-motion ]
 ---
 
